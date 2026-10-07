@@ -10,7 +10,7 @@ Para poder usarlo:
 - Sustituye el codigo que viene en el archivo que se ha abierto por el contenido de `Script.js`
 - Cambia el nombre del *Proyecto sin titulo* por algo más descriptivo tipo *Copiar datos de estudiantes*
 - Da a Guardar (Disquete que sale)
-- Luego das a Ejecutar y eso abre una ventana de confirmación en la hoja de cálculo.\
+- Luego das a **Ejecutar** (Asegurate que está seleccionada a la derecha de **Ejecutar** y **Depuración** la función `buscarYCopiarEstudiantes`) y eso abre una ventana de confirmación en la hoja de cálculo.\
 - Te dará un aviso de permisos, tienes que permitirlo para poder ejecutarlo.
 <br>
 
