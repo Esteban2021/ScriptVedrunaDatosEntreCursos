@@ -121,113 +121,6 @@ var COLUMNA_INICIO_ORIGEN = "C";  // Dónde empiezan los datos a copiar en las p
 
 
 // ==========================================
-// FUNCIONES AUXILIARES
-// ==========================================
-// Función auxiliar para convertir letras de columna (ej: "A" -> 1, "B" -> 2, etc.)
-function letraANumero(letra) {
-  letra = letra.toUpperCase();
-  var suma = 0;
-  for (var i = 0; i < letra.length; i++) {
-    suma *= 26;
-    suma += letra.charCodeAt(i) - 64;
-  }
-  return suma;
-}
-
-/**
- * Convierte una lista de letras de columna (["A","B"]) en una lista de números ([1,2]).
- */
-function letrasANumeros(letras) {
-  var numeros = [];
-  for (var i = 0; i < letras.length; i++) {
-    numeros.push(letraANumero(letras[i]));
-  }
-  return numeros;
-}
-
-/**
- * Normaliza un nombre para comparaciones: quita tildes, pasa a minusculas,
- * colapsa espacios repetidos y recorta espacios sobrantes.
- * Ejemplo: "LOPEZ SANCHEZ LEIRE" y "López  Sánchez Leire" se consideran iguales.
- */
-function normalizarNombre(nombre) {
-  return nombre
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/\s+/g, " ")
-    .trim()
-    .toLowerCase();
-}
-
-/**
- * Monta el nombre completo de una fila uniendo, en orden, las columnas indicadas.
- * Las celdas vacías se ignoran. Devuelve el resultado ya normalizado.
- * Ejemplo: fila con [LOPEZ, SANCHEZ, LEIRE] y columnas [1,2,3] -> "lopez sanchez leire"
- */
-function construirNombre(fila, columnasNum) {
-  var partes = [];
-  for (var c = 0; c < columnasNum.length; c++) {
-    var valor = String(fila[columnasNum[c] - 1]).trim();
-    if (valor !== "") partes.push(valor);
-  }
-  return normalizarNombre(partes.join(" "));
-}
-
-/**
- * Devuelve las pestañas de origen configuradas para los mensajes de log y confirmación.
- */
-function nombresOrigenes() {
-  var nombres = [];
-  for (var k = 0; k < PESTANAS_ORIGEN.length; k++) {
-    nombres.push(PESTANAS_ORIGEN[k].nombre + " (nombre en col. " + PESTANAS_ORIGEN[k].colsNombre.join("+") + ")");
-  }
-  return nombres.join(" → ");
-}
-
-/**
- * Función independiente para mostrar la advertencia y pedir confirmación al usuario.
- * Utiliza Ui.alert para respetar correctamente los saltos de línea (\n).
- */
-function confirmarEjecucion(nombreDestino, pestanaDestino) {
-  var ui = SpreadsheetApp.getUi();
-
-  // Calculamos las letras de fin de rango para mostrarlas claramente en el mensaje
-  var colInicioDestNum = letraANumero(COLUMNA_INICIO_DESTINO);
-  var colFinDestNum = colInicioDestNum + CANTIDAD_COLUMNAS - 1;
-  // Usamos la pestaña activa para obtener la anotación A1 correctamente
-  var colFinDestLetra = pestanaDestino.getRange(1, colFinDestNum).getA1Notation().replace(/[0-9]/g, '');
-
-  var colInicioOrigNum = letraANumero(COLUMNA_INICIO_ORIGEN);
-  var colFinOrigNum = colInicioOrigNum + CANTIDAD_COLUMNAS - 1;
-  var colFinOrigLetra = pestanaDestino.getRange(1, colFinOrigNum).getA1Notation().replace(/[0-9]/g, '');
-
-  // 💬 Mensaje de confirmación detallado con saltos de línea limpios
-  var mensaje = "⚠️ ADVERTENCIA DE SOBRESCRITURA ⚠️\n\n\n" +
-    "Estás a punto de ejecutar la importación de datos:\n\n" +
-    "• Pestañas de ORIGEN (Lectura, se busca en este orden): \n  " + nombresOrigenes() +
-    "   [Columnas con datos en ambas: " + COLUMNA_INICIO_ORIGEN + " a " + colFinOrigLetra + "]\n" +
-    "• Pestaña de DESTINO (Escritura): " + nombreDestino + " (Nombre en col. " + COLS_NOMBRE_DESTINO.join("+") + ", Columnas de destino: " + COLUMNA_INICIO_DESTINO + " a " + colFinDestLetra + ")\n\n" +
-    "❗ ATENCIÓN: Los valores actuales en el rango de destino de la pestaña '" + nombreDestino + "' SE PERDERÁN Y SERÁN SOBRESCRITOS.\n\n" +
-    "¿Deseas continuar?" +
-    "\n\n (NOTA: si das a Sí, ten paciencia, esta ventana se cierra y en unos segundos se ve el resultado)";
-
-  var respuesta = ui.alert("Confirmación de Proceso", mensaje, ui.ButtonSet.YES_NO);
-
-  if (respuesta !== ui.Button.YES) {
-    SpreadsheetApp.getActiveSpreadsheet().toast("Proceso cancelado por el usuario.", "Cancelado", 3);
-    Logger.log("Proceso cancelado por el usuario.");
-    return false;
-  }
-
-  return true;
-}
-
-
-
-
-
-
-// ==========================================
 //
 //
 // Función principal que ejecuta la búsqueda y el copiado
@@ -377,4 +270,112 @@ function buscarYCopiarEstudiantes() {
   Logger.log("----------------------------------------");
 
   SpreadsheetApp.getUi().alert("¡Búsqueda completada!\n\nEncontrados: " + encontradosCount + "\nNo encontrados: " + noEncontradosCount + "\n\n (NOTA: Ten paciencia, una vez cerrada esta ventana tarda un par de segundos en verse los valores)");
+}
+
+
+
+
+
+
+
+// ==========================================
+// FUNCIONES AUXILIARES
+// ==========================================
+// Función auxiliar para convertir letras de columna (ej: "A" -> 1, "B" -> 2, etc.)
+function letraANumero(letra) {
+  letra = letra.toUpperCase();
+  var suma = 0;
+  for (var i = 0; i < letra.length; i++) {
+    suma *= 26;
+    suma += letra.charCodeAt(i) - 64;
+  }
+  return suma;
+}
+
+/**
+ * Convierte una lista de letras de columna (["A","B"]) en una lista de números ([1,2]).
+ */
+function letrasANumeros(letras) {
+  var numeros = [];
+  for (var i = 0; i < letras.length; i++) {
+    numeros.push(letraANumero(letras[i]));
+  }
+  return numeros;
+}
+
+/**
+ * Normaliza un nombre para comparaciones: quita tildes, pasa a minusculas,
+ * colapsa espacios repetidos y recorta espacios sobrantes.
+ * Ejemplo: "LOPEZ SANCHEZ LEIRE" y "López  Sánchez Leire" se consideran iguales.
+ */
+function normalizarNombre(nombre) {
+  return nombre
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+/**
+ * Monta el nombre completo de una fila uniendo, en orden, las columnas indicadas.
+ * Las celdas vacías se ignoran. Devuelve el resultado ya normalizado.
+ * Ejemplo: fila con [LOPEZ, SANCHEZ, LEIRE] y columnas [1,2,3] -> "lopez sanchez leire"
+ */
+function construirNombre(fila, columnasNum) {
+  var partes = [];
+  for (var c = 0; c < columnasNum.length; c++) {
+    var valor = String(fila[columnasNum[c] - 1]).trim();
+    if (valor !== "") partes.push(valor);
+  }
+  return normalizarNombre(partes.join(" "));
+}
+
+/**
+ * Devuelve las pestañas de origen configuradas para los mensajes de log y confirmación.
+ */
+function nombresOrigenes() {
+  var nombres = [];
+  for (var k = 0; k < PESTANAS_ORIGEN.length; k++) {
+    nombres.push(PESTANAS_ORIGEN[k].nombre + " (nombre en col. " + PESTANAS_ORIGEN[k].colsNombre.join("+") + ")");
+  }
+  return nombres.join(" → ");
+}
+
+/**
+ * Función independiente para mostrar la advertencia y pedir confirmación al usuario.
+ * Utiliza Ui.alert para respetar correctamente los saltos de línea (\n).
+ */
+function confirmarEjecucion(nombreDestino, pestanaDestino) {
+  var ui = SpreadsheetApp.getUi();
+
+  // Calculamos las letras de fin de rango para mostrarlas claramente en el mensaje
+  var colInicioDestNum = letraANumero(COLUMNA_INICIO_DESTINO);
+  var colFinDestNum = colInicioDestNum + CANTIDAD_COLUMNAS - 1;
+  // Usamos la pestaña activa para obtener la anotación A1 correctamente
+  var colFinDestLetra = pestanaDestino.getRange(1, colFinDestNum).getA1Notation().replace(/[0-9]/g, '');
+
+  var colInicioOrigNum = letraANumero(COLUMNA_INICIO_ORIGEN);
+  var colFinOrigNum = colInicioOrigNum + CANTIDAD_COLUMNAS - 1;
+  var colFinOrigLetra = pestanaDestino.getRange(1, colFinOrigNum).getA1Notation().replace(/[0-9]/g, '');
+
+  // 💬 Mensaje de confirmación detallado con saltos de línea limpios
+  var mensaje = "⚠️ ADVERTENCIA DE SOBRESCRITURA ⚠️\n\n\n" +
+    "Estás a punto de ejecutar la importación de datos:\n\n" +
+    "• Pestañas de ORIGEN (Lectura, se busca en este orden): \n  " + nombresOrigenes() +
+    "   [Columnas con datos en ambas: " + COLUMNA_INICIO_ORIGEN + " a " + colFinOrigLetra + "]\n" +
+    "• Pestaña de DESTINO (Escritura): " + nombreDestino + " (Nombre en col. " + COLS_NOMBRE_DESTINO.join("+") + ", Columnas de destino: " + COLUMNA_INICIO_DESTINO + " a " + colFinDestLetra + ")\n\n" +
+    "❗ ATENCIÓN: Los valores actuales en el rango de destino de la pestaña '" + nombreDestino + "' SE PERDERÁN Y SERÁN SOBRESCRITOS.\n\n" +
+    "¿Deseas continuar?" +
+    "\n\n (NOTA: si das a Sí, ten paciencia, esta ventana se cierra y en unos segundos se ve el resultado)";
+
+  var respuesta = ui.alert("Confirmación de Proceso", mensaje, ui.ButtonSet.YES_NO);
+
+  if (respuesta !== ui.Button.YES) {
+    SpreadsheetApp.getActiveSpreadsheet().toast("Proceso cancelado por el usuario.", "Cancelado", 3);
+    Logger.log("Proceso cancelado por el usuario.");
+    return false;
+  }
+
+  return true;
 }
