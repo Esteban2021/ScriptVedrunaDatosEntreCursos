@@ -7,11 +7,11 @@
 // Idioma de comentarios, logs y mensajes al usuario: ESPAÑOL (mantenerlo).
 //
 // PROPÓSITO
-//   Migrar datos de alumnos de pestañas de cursos anteriores a la pestaña del
-//   curso actual. Para cada alumno de la pestaña de DESTINO se busca su nombre
+//   Migrar datos de estudiantes de pestañas de cursos anteriores a la pestaña del
+//   curso actual. Para cada estudiante de la pestaña de DESTINO se busca su nombre
 //   completo en las pestañas de ORIGEN y se copia un bloque de columnas.
 //
-// FLUJO (función principal: buscarYCopiarAlumnos)
+// FLUJO (función principal: buscarYCopiarEstudiantes)
 //   1. Valida que existan la pestaña de destino y TODAS las de origen.
 //   2. Pide confirmación con ui.alert (confirmarEjecucion): avisa de que el rango
 //      de destino se SOBRESCRIBE. Si el usuario no pulsa YES, se cancela.
@@ -19,13 +19,13 @@
 //      la cabecera). Evitar llamadas a la hoja dentro de bucles: son muy lentas.
 //   4. Para cada pestaña de origen crea un índice { nombre normalizado -> fila }
 //      (si hay nombres repetidos en una misma pestaña, gana la primera aparición).
-//   5. Para cada alumno del destino monta su nombre completo, lo busca en los
+//   5. Para cada estudiante del destino monta su nombre completo, lo busca en los
 //      orígenes EN EL ORDEN CONFIGURADO y se detiene en el primer acierto
-//      (hay alumnos repetidores: primero se mira el año pasado, luego el anterior).
+//      (hay estudiantes repetidores: primero se mira el año pasado, luego el anterior).
 //   6. Encontrado     -> copia CANTIDAD_COLUMNAS columnas con setValues en el destino.
 //      No encontrado  -> limpia ese rango (clearContent) y escribe "NO ENCONTRADO"
 //                        en su primera celda para revisión manual.
-//   7. Registra cada alumno con Logger.log y muestra un resumen final con alert.
+//   7. Registra cada estudiante con Logger.log y muestra un resumen final con alert.
 //
 // CÓMO SE COMPARAN LOS NOMBRES (importante)
 //   - No existe columna con fórmula: el nombre completo se MONTA en el script
@@ -100,15 +100,15 @@ var NOMBRE_PESTANA_DESTINO = "3ESO26";     // Pestaña de destino (este año)
 // apellidos primero y nombre al final), aunque unas tengan 2 columnas y otras 3.
 // Las celdas vacías (por ejemplo, un segundo apellido en blanco) se ignoran.
 // ⚠️ AJUSTA estas letras a tus pestañas reales.
-var COLS_NOMBRE_DESTINO = ["I", "J", "K"];   // Pestaña de destino (este año)
+var COLS_NOMBRE_DESTINO = ["I", "J", "K"];
 
-// Pestañas de ORIGEN (años anteriores). Hay alumnos que han repetido,
+// Pestañas de ORIGEN (años anteriores). Hay estudiantes que han repetido,
 // por eso se busca primero en la primera pestaña y, si no aparece, en la siguiente.
 // Puedes añadir o quitar tantas pestañas como necesites.
 // Cada una pude tener su propia lista de columnas de nombre.
 var PESTANAS_ORIGEN = [
-  { nombre: "2ESO25", colsNombre: ["A", "B"] },        // Pestaña de origen 1 (año pasado): apellidos + nombre
-  { nombre: "3ESO25", colsNombre: ["A", "B"] }    // Pestaña de origen 2 (curso anterior al repetir): apellido1 + apellido2 + nombre
+  { nombre: "2ESO25", colsNombre: ["A", "B"] }, // Pestaña de origen 1 (año pasado): apellidos + nombre
+  { nombre: "3ESO25", colsNombre: ["A", "B"] }  // Pestaña de origen 2 (curso anterior al repetir): apellidos + nombre
 ];
 
 var COLUMNA_INICIO_DESTINO = "L"; // Dónde empiezan a pegarse las columnas en la pestaña de destino
@@ -235,7 +235,7 @@ function confirmarEjecucion(nombreDestino, pestanaDestino) {
 //
 //
 // ==========================================
-function buscarYCopiarAlumnos() {
+function buscarYCopiarEstudiantes() {
   var sheet = SpreadsheetApp.getActiveSpreadsheet();
 
   var pestanaDestino = sheet.getSheetByName(NOMBRE_PESTANA_DESTINO);
@@ -305,15 +305,15 @@ function buscarYCopiarAlumnos() {
   }
 
   Logger.log("----------------------------------------");
-  Logger.log("INICIANDO BÚSQUEDA Y COPIA DE ALUMNOS...");
+  Logger.log("INICIANDO BÚSQUEDA Y COPIA DE ESTUDIANTES...");
   Logger.log("Pestañas de origen (en este orden): " + nombresOrigenes());
-  Logger.log("Total alumnos a procesar: " + datosDestino.length);
+  Logger.log("Total estudiantes a procesar: " + datosDestino.length);
   Logger.log("----------------------------------------");
 
   var encontradosCount = 0;
   var noEncontradosCount = 0;
 
-  // Recorremos cada alumno de este año
+  // Recorremos cada estudiante de este año
   for (var i = 0; i < datosDestino.length; i++) {
     // Montamos el nombre completo uniendo las columnas configuradas
     // (ya normalizado: sin tildes, en minúsculas y sin espacios sobrantes)
@@ -327,7 +327,7 @@ function buscarYCopiarAlumnos() {
     var pestanaOrigenEncontrada = "";
 
     // Buscamos en TODAS las pestañas de origen, en el orden configurado.
-    // En cuanto aparece el alumno en una de ellas, se detiene la búsqueda.
+    // En cuanto aparece el estudiante en una de ellas, se detiene la búsqueda.
     for (var k = 0; k < origenes.length; k++) {
       var o = origenes[k];
 
@@ -372,8 +372,8 @@ function buscarYCopiarAlumnos() {
 
   Logger.log("----------------------------------------");
   Logger.log("RESUMEN FINAL:");
-  Logger.log("- Alumnos encontrados y copiados: " + encontradosCount);
-  Logger.log("- Alumnos no encontrados (marcados): " + noEncontradosCount);
+  Logger.log("- Estudiantes encontrados y copiados: " + encontradosCount);
+  Logger.log("- Estudiantes no encontrados (marcados): " + noEncontradosCount);
   Logger.log("----------------------------------------");
 
   SpreadsheetApp.getUi().alert("¡Búsqueda completada!\n\nEncontrados: " + encontradosCount + "\nNo encontrados: " + noEncontradosCount + "\n\n (NOTA: Ten paciencia, una vez cerrada esta ventana tarda un par de segundos en verse los valores)");
