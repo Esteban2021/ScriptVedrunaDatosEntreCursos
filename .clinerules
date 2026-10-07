@@ -1,0 +1,25 @@
+### ⚠️ Archivo importante
+**`Script.js`** es el único archivo importante de este proyecto. Los demás archivos (por ejemplo, `Script3.js` y `ScriptOLD.js`) son obsoletos o auxiliares y deben ignorarse.
+
+### 📋 Automatización de Búsqueda y Copia de Alumnos entre Pestañas (Google Apps Script)
+
+#### **Propósito General**
+Este script automatiza el proceso de migración y sincronización de datos de alumnos entre dos pestañas de Google Sheets correspondientes a distintos ciclos (por ejemplo, el curso pasado y el curso actual). Busca a cada alumno por su nombre completo y transfiere automáticamente un bloque de información.
+
+#### **Funcionamiento y Lógica Principal**
+1. **Configuración Centralizada:** Permite definir mediante constantes globales (fáciles de modificar):
+   - Los nombres de las pestañas de origen (*Curso Anterior*) y destino (*Curso Actual*).
+   - Las columnas de búsqueda del nombre completo en ambas pestañas (configuradas mediante letras como `"A"`, `"B"`, etc.).
+   - Las columnas de origen y destino, así como la cantidad de columnas a copiar.
+2. **Validación y Seguridad Previa:**
+   - Cuenta con una función independiente (`confirmarEjecucion`) que muestra una ventana de advertencia detallada mediante la interfaz de Google (`Ui.alert`).
+   - Informa al usuario sobre las pestañas involucradas, las letras de las columnas y advierte explícitamente que **los valores actuales en el rango de destino se sobrescribirán**. Permite cancelar la ejecución si el usuario no está seguro.
+3. **Traducción de Coordenadas:** Incluye una función auxiliar (`letraANumero`) para convertir de forma transparente las letras de las columnas (A, B, C...) a índices numéricos compatibles con las funciones de rangos de Google Apps Script.
+4. **Proceso de Búsqueda y Copia:**
+   - Lee todos los registros de ambas pestañas en memoria para optimizar el rendimiento y evitar llamadas lentas repetitivas a la hoja.
+   - Normaliza los nombres (convirtiéndolos a minúsculas y eliminando espacios sobrantes) para asegurar una coincidencia robusta.
+   - **Si encuentra al alumno:** Copia exactamente el bloque de 7 columnas desde la pestaña anterior a la actual y limpia cualquier alerta visual previa.
+   - **Si NO encuentra al alumno:** Limpia el contenido del rango de destino, marca las celdas con un fondo rojo claro (`#f4cccc`) y escribe `"NO ENCONTRADO"` para requerir la introducción manual.
+5. **Registro y Trazabilidad (Logging):**
+   - Utiliza la consola de registro (`Logger.log`) para detallar en tiempo real qué alumnos fueron encontrados o cuáles requirieron intervención manual.
+   - Muestra un resumen final con el recuento total de aciertos y ausencias al finalizar el proceso.
