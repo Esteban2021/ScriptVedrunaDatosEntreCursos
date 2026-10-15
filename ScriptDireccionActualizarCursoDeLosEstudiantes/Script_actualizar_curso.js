@@ -77,7 +77,10 @@
  *     renombrar, por eso el texto explica cada uno):
  *        Sí       -> actualiza nombre (A, B, C con el reparto de
  *                    separarApellidos_) y curso
- *        No       -> actualiza solo el curso
+ *        No       -> actualiza solo el curso, pero ANTES muestra una segunda
+ *                    ventana Sí/No de confirmación ("Se actualizará SOLO el
+ *                    curso..."); si en ella se responde No, se vuelve a mostrar
+ *                    la pregunta anterior
  *        Cancelar -> no es el mismo; se prueba el siguiente candidato y, si
  *                    no hay más, la fila queda como no encontrada
  *     Las respuestas solo se aplican en el paso 5 (escritura), así que no se
@@ -661,7 +664,7 @@ function processCsv_(sheet, csvText, archivo) {
   // Para los estudiantes de la hoja que siguen sin coincidencia pero tienen en el CSV una entrada con los
   // mismos apellidos (y que no coincide ya con otra fila de la hoja), se pregunta al usuario si es el mismo:
   //   Sí (YES)         -> actualizar el nombre en la hoja con el del CSV y el curso
-  //   No (NO)          -> actualizar solo el curso (el nombre de la hoja no se toca)
+  //   No (NO)          -> actualizar solo el curso (el nombre de la hoja no se toca), previa segunda confirmación Sí/No
   //   Cancelar / cerrar -> no es el mismo estudiante; se prueba el siguiente candidato (si lo hay) y se continúa
   // Todavía no se ha escrito nada en la hoja: las respuestas solo se aplican en el paso 5.
   let confirmadosNombreYCurso = 0;
@@ -684,7 +687,11 @@ function processCsv_(sheet, csvText, archivo) {
         const e = candidatos[c];
         if (sheetMap.has(e.key)) continue;           // ya emparejada con otra fila (o confirmada antes)
 
-        const respuesta = ui.alert(
+        let respuesta;
+        let preguntar = true;
+        while (preguntar) {
+          preguntar = false;
+          respuesta = ui.alert(
           'Estudiante no encontrado',
           'No se ha encontrado este estudiante, pero he encontrado este con los mismos apellidos en el CSV\n\n' +
           '"' + sheetNames[i] + '" (fila ' + (firstRow + i) + ')\n' +
@@ -695,7 +702,21 @@ function processCsv_(sheet, csvText, archivo) {
           'No  =  Este NO es un NO ACTUALICES EL NOMBRE (lo que haré es actualizar solo el curso)\n' +
           'Cancelar  =  Esto es NO ES EL MISMO, continúa ejecutando el script (no actualizo nada)',
           ui.ButtonSet.YES_NO_CANCEL
-        );
+          );
+
+          // "No" = actualizar SOLO el curso: se pide una segunda confirmación (Sí / No).
+          // Si en la segunda se responde No, se vuelve a mostrar la pregunta anterior.
+          if (respuesta === ui.Button.NO) {
+            const confirmaSoloCurso = ui.alert(
+              'Confirmar: actualizar solo el curso',
+              'Se actualizará SOLO el curso del estudiante "' + sheetNames[i] +
+              'El nombre en la hoja NO se modificará.\n\n' +
+              '¿Confirmas?\n(Sí = confirmar, No = volver a la pregunta anterior)',
+              ui.ButtonSet.YES_NO
+            );
+            if (confirmaSoloCurso !== ui.Button.YES) preguntar = true;
+          }
+        }
 
         if (respuesta === ui.Button.YES || respuesta === ui.Button.NO) {
           sheetKeys[i] = e.key;
