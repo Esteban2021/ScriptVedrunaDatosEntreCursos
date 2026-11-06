@@ -4,79 +4,101 @@
  * ============================================================================
  * PROPÓSITO
  *   Script de Google Apps Script ligado a un Google Spreadsheet con el listado
- *   de estudiantes de un centro educativo. Una vez al año (o cuando haga falta)
- *   el usuario sube un CSV a Google Drive con el listado oficial actualizado y
- *   el script sincroniza la hoja con ese CSV.
+ *   de estudiantes de un centro educativo. Se usa en DOS PASOS, cada uno con su
+ *   propio CSV subido a Google Drive y su propia opción del menú:
+ *     PASO 1 (actualizarCursos -> procesarCursos_): sincroniza la hoja con el
+ *       listado oficial de cursos (CSV de cursos).
+ *     PASO 2 (actualizarDatosPersonales -> procesarDatosPersonales_): rellena la
+ *       fecha de nacimiento, el país y la nacionalidad (CSV de datos personales).
+ *   Los dos CSV vienen de listados distintos y NO se comparan igual con la hoja
+ *   (ver REGLAS DE NEGOCIO de cada paso).
  *
  * ESTRUCTURA DE LA HOJA (configurable en la sección CONFIGURACIÓN)
  *   - Columna A: apellido 1 | Columna B: apellido 2 | Columna C: nombre
+ *   - Columna D: fecha de nacimiento | Columna F: país | Columna G: nacionalidad
+ *     (configurable, ver COL_FECHA_NACIMIENTO, COL_PAIS y COL_NACIONALIDAD).
+ *     Solo las escribe el PASO 2. La columna E y cualquier otra no indicada en
+ *     esta lista NO se tocan.
  *   - Columna Q: curso del estudiante, con un valor de CURSOS_VALIDOS
- *     (configurable, ver COL_CURSO)
+ *     (configurable, ver COL_CURSO). Solo la escribe el PASO 1.
  *   - Columna R: resto de la información del curso del CSV (grupo, "(R)",
- *     etc.) (configurable, ver COL_CURSO_EXTRA)
+ *     etc.) (configurable, ver COL_CURSO_EXTRA). Solo la escribe el PASO 1.
  *   - Las primeras HEADER_ROWS filas son encabezado (el primer estudiante está
  *     en la fila 3 por defecto).
  *   - Se trabaja siempre sobre la HOJA ACTIVA; antes de empezar se muestra un
  *     aviso con el nombre de la hoja y hay que confirmar.
  *
- * FORMATO DEL CSV (sin fila de encabezado, separador coma, campos entre comillas)
- *     "18","ORBULESCU , ANA MARÍA","ESO1A"
- *   - Campo 0: número de orden -> SE IGNORA.
- *   - Campo 1: "APELLIDOS , NOMBRE" (apellidos y nombre separados por la
- *     PRIMERA coma).
- *   - Campo 2: curso en formato libre del CSV (ver TRANSFORMACIÓN DEL CURSO).
+ * FORMATO DEL CSV DEL PASO 1 (cursos; ver FORMATO_CSV_CURSOS)
+ *   CON fila de encabezado, separador coma, campos entre comillas:
+ *     "NIF/Pasaporte","Apellidos","Nombre","Sección"
+ *     "12345678Z","ORBULESCU","ANA MARÍA","ESO1A"
+ *   - Encabezado: se salta (CSV_TIENE_CABECERA), pero antes se comprueba que las
+ *     columnas usadas se llaman como se espera (cabecerasEsperadas), para no
+ *     leer una columna equivocada si cambia el orden.
+ *   - Campo 0: NIF/Pasaporte -> SE IGNORA.
+ *   - Campo 1 (CSV_CURSOS_IDX_APELLIDOS): apellidos.
+ *   - Campo 2 (CSV_CURSOS_IDX_NOMBRE): nombre.
+ *   - Campo 3 (CSV_CURSOS_IDX_CURSO): sección = curso en formato libre del CSV
+ *     (ver TRANSFORMACIÓN DEL CURSO).
+ *
+ * FORMATO DEL CSV DEL PASO 2 (datos personales; ver FORMATO_CSV_DATOS)
+ *   CON fila de encabezado, separador coma, campos entre comillas:
+ *     "Nº","Alumno/a","NIF/Pasaporte","Fecha nacimiento","Localidad","Provincia","País","NACIONALIDAD"
+ *     "18","ANA MARÍA ORBULESCU","12345678Z","03/05/2009","MADRID","MADRID","ESPAÑA","RUMANA"
+ *   - Campo 1 (CSV_DATOS_IDX_NOMBRE_COMPLETO): "Alumno/a" = NOMBRE seguido de
+ *     APELLIDOS en un solo campo, sin coma (el orden contrario al de la hoja).
+ *   - Campo 3: fecha de nacimiento -> columna D.
+ *   - Campo 6: país -> columna F.
+ *   - Campo 7: nacionalidad -> columna G.
+ *   - Campos 0 (Nº), 2 (NIF/Pasaporte), 4 (Localidad) y 5 (Provincia): SE IGNORAN.
+ *
+ * CODIFICACIÓN Y VALIDACIÓN (comunes a los dos CSV)
  *   - Codificación (ver leerCsv_): se detecta automáticamente. UTF-16 LE/BE
  *     (con o sin BOM; es la que genera el sistema de gestión del centro),
  *     UTF-8 (con o sin BOM) y, si tiene caracteres inválidos, windows-1252.
  *     Un CSV UTF-16 leído como UTF-8 se ve como texto con caracteres nulos
  *     ("�") entre cada letra; no cambiar esta detección sin revisarlo.
- *   - VALIDACIÓN DE ESTRUCTURA (ver validarEstructuraCsv_ y esLineaCsvValida_):
- *     una línea es válida si tiene 3 campos, el primero son solo dígitos y el
- *     segundo es "APELLIDOS , NOMBRE" (una coma con texto a ambos lados). Si
- *     menos del PORCENTAJE_MIN_LINEAS_VALIDAS (90%) de las líneas no vacías
- *     son válidas se lanza un error que explica el formato esperado, con
- *     ejemplos de líneas incorrectas, y no se modifica nada. Las pocas líneas
- *     inválidas que queden se ignoran y se cuentan en el resumen.
+ *   - VALIDACIÓN DE ESTRUCTURA (ver prepararFilasCsv_, validarEstructuraCsv_ y la
+ *     función esLineaValida de cada formato): una línea es válida si tiene campos
+ *     suficientes para el índice mayor usado y los campos de nombre no están
+ *     vacíos (paso 1: apellidos y nombre; paso 2: Alumno/a). El encabezado no
+ *     cuenta. Si menos del PORCENTAJE_MIN_LINEAS_VALIDAS (90%) de las líneas no
+ *     vacías son válidas se lanza un error que explica el formato esperado de
+ *     ESE paso, con ejemplos de líneas incorrectas, y no se modifica nada. Las
+ *     pocas líneas inválidas que queden se ignoran y se cuentan en el resumen.
+ *     Si se usa el CSV de un paso en el otro, falla la comprobación del
+ *     encabezado y se muestra ese mismo error.
  *
  * FLUJO (SIN HTML: no se usa HtmlService ni google.script.run, para evitar
  * problemas con varias cuentas de Google abiertas en el navegador)
- *   1. Menú "Estudiantes > Actualizar desde CSV" (onOpen -> actualizarEstudiantes).
+ *   1. Menú "Estudiantes" con dos opciones (onOpen): "Paso 1: Actualizar cursos
+ *      desde CSV" y "Paso 2: Completar fecha de nacimiento, país y nacionalidad".
+ *      Ambas ejecutan ejecutarPaso_ con su función de proceso.
  *   2. Aviso de confirmación con el nombre de la hoja activa.
  *   3. Cuadro de texto que pide el nombre, la URL o el ID del CSV en Google Drive
  *      (ver buscarArchivoCsv_).
  *   3b. comprobarEsCsv_ verifica (solo con nombre y tipo MIME, sin leer el
  *       contenido) que el archivo es un CSV. Si no lo es, se muestra un aviso y
  *       se detiene el proceso sin leer el archivo ni modificar la hoja.
- *   4. processCsv_ compara y actualiza la hoja y devuelve un resumen.
+ *   4. procesarCursos_ (paso 1) o procesarDatosPersonales_ (paso 2) compara y
+ *      actualiza la hoja y devuelve un resumen.
  *   5. El resumen (solo totales, sin detalle de estudiantes) se muestra en un
  *      cuadro de alerta y se guarda en el registro de ejecución con Logger.log.
+ *      Si había varios archivos con el mismo nombre, el aviso se antepone.
  *
- * REGLAS DE NEGOCIO
+ * REGLAS DE NEGOCIO DEL PASO 1 (cursos)
  *   - Comparación por nombre completo NORMALIZADO: concatenar
  *     apellido1 + apellido2 + nombre (hoja) frente a "apellidos nombre" (CSV),
  *     sin comas, minúsculas, sin tildes ni diacríticos (la ñ pasa a n) y con
  *     espacios múltiples colapsados a uno solo.
- *   - COINCIDENCIA POR NOMBRE PARCIAL (COINCIDIR_POR_NOMBRE_PARCIAL; ver bloque
- *     2b de processCsv_ y nombreEsInicioDe_): el CSV trae el nombre completo
- *     ("PEDRAZA CANDIA, LINDAH CHARLOTTE") pero la hoja a veces solo parte de
- *     él ("PEDRAZA | CANDIA | LINDAH"). Para las filas de la hoja SIN
- *     coincidencia exacta se acepta una entrada del CSV si: los apellidos
- *     (apellido1 + apellido2 de la hoja) coinciden exactamente tras normalizar;
- *     los nombres de la hoja son el PRINCIPIO del nombre del CSV (no al revés
- *     ni en otro orden); el candidato es único; no hay duplicados de esa
- *     entrada en el CSV; no coincide ya exactamente con otra fila; y ninguna
- *     otra fila de la hoja la reclama. Si hay ambigüedad no se empareja y la
- *     fila sigue como no encontrada. Al aceptarla, la fila usa la clave del CSV
- *     y el resto de reglas (curso, duplicados, nuevos) se aplican igual. No se
- *     modifican los nombres de la hoja. Se cuenta en el resumen.
- *   - CONFIRMACIÓN MANUAL (CONFIRMAR_MISMOS_APELLIDOS; bloque 2c de
- *     processCsv_): para las filas de la hoja que siguen sin coincidencia
- *     (tras la exacta y la parcial) pero con una entrada del CSV con los MISMOS
- *     apellidos (normalizados) que no coincide ya con otra fila, se muestra un
- *     cuadro Sí/No/Cancelar (los botones de Apps Script no se pueden
- *     renombrar, por eso el texto explica cada uno):
- *        Sí       -> actualiza nombre (A, B, C con el reparto de
- *                    separarApellidos_) y curso
+ *   - CONFIRMACIÓN MANUAL (CONFIRMAR_MISMOS_APELLIDOS; bloque 2b de
+ *     procesarCursos_): para las filas de la hoja sin coincidencia exacta pero
+ *     con una entrada del CSV con los MISMOS apellidos (normalizados) que no
+ *     coincide ya con otra fila, se muestra un cuadro Sí/No/Cancelar (los
+ *     botones de Apps Script no se pueden renombrar, por eso el texto explica
+ *     cada uno):
+ *        Sí       -> actualiza SOLO el nombre (columna C) y el curso; los
+ *                    apellidos (columnas A y B) NO se modifican nunca
  *        No       -> actualiza solo el curso, pero ANTES muestra una segunda
  *                    ventana Sí/No de confirmación ("Se actualizará SOLO el
  *                    curso..."); si en ella se responde No, se vuelve a mostrar
@@ -85,7 +107,34 @@
  *                    no hay más, la fila queda como no encontrada
  *     Las respuestas solo se aplican en el paso 5 (escritura), así que no se
  *     modifica nada antes. Cubre, por ejemplo, erratas en el nombre
- *     (hoja "YALIANA ALTAGRACIA" frente a CSV "YALIANI ALTAGRACIA").
+ *     (hoja "YALIANA ALTAGRACIA" frente a CSV "YALIANI ALTAGRACIA") y nombres
+ *     incompletos en la hoja ("DULCE" frente a "DULCE ZOE"). NO hay
+ *     coincidencia automática por nombre parcial: estos casos siempre se
+ *     preguntan.
+ *   - ICONO DEL AVISO: el cuadro empieza y sigue con ✅ si aparentemente solo
+ *     falta parte del nombre en la hoja (el nombre de la hoja es el PRINCIPIO del
+ *     nombre del CSV y el CSV tiene más palabras: "DULCE" frente a "DULCE ZOE"),
+ *     y con ⚠️ en cualquier otro caso (hermanos con los mismos apellidos,
+ *     erratas, otro orden de los nombres...). Con ⚠️ además se deja una línea
+ *     en blanco más antes de "Hoja:" y antes de "¿Es el mismo estudiante?". Es solo informativo: no cambia lo que
+ *     hacen los botones (ver nombreEsInicioDe_).
+ *   - CONTADOR DE PREGUNTAS: el título de cada cuadro muestra "pregunta X/N".
+ *     N es el nº de filas de la hoja sin coincidencia exacta que tienen algún
+ *     candidato con los mismos apellidos, calculado antes de preguntar; es
+ *     aproximado (una respuesta puede emparejar una entrada que era candidata de
+ *     otra fila, y entonces se salta alguna pregunta; si se responde "Cancelar"
+ *     y la fila tiene otro candidato, se repite el mismo número).
+ *   - LÍMITE DE TIEMPO (MINUTOS_AVISO_LIMITE = 5): Apps Script corta cada
+ *     ejecución a los 6 minutos y se perderían todas las respuestas, que solo se
+ *     escriben al final. Si al ir a mostrar una pregunta han pasado 5 minutos
+ *     desde que se lanzó el paso, se muestra en su lugar un aviso (Sí = guardar
+ *     los avances y detener, recomendado; No = seguir preguntando bajo el propio
+ *     riesgo). El GUARDADO PARCIAL escribe solo los estudiantes ya emparejados
+ *     (exactos y confirmados) y NO marca no encontrados ni añade nuevos, porque
+ *     las filas sin preguntar todavía no están resueltas. Al volver a lanzar el
+ *     paso 1: los confirmados con "Sí" ya coinciden exactamente (no se
+ *     preguntan), pero los respondidos con "No" o "Cancelar" se volverán a
+ *     preguntar.
  *   - Estudiante de la hoja encontrado en el CSV -> se escribe SIEMPRE el curso
  *     del CSV (el CSV es la fuente más actualizada), sea igual o distinto al actual.
  *   - REGLA GENERAL DE INCIDENCIAS: la columna COL_CURSO tiene validación de
@@ -101,7 +150,9 @@
  *     exactamente 2 palabras, la primera va a COL_APELLIDO1 y la segunda a
  *     COL_APELLIDO2; en cualquier otro caso (1 palabra, o 3 o más, por ejemplo
  *     apellidos compuestos como "DE LA CRUZ") TODOS los apellidos van en
- *     COL_APELLIDO1 y COL_APELLIDO2 queda vacía.
+ *     COL_APELLIDO1 y COL_APELLIDO2 queda vacía. Este reparto se aplica SOLO a
+ *     los estudiantes nuevos: los apellidos de los estudiantes que ya están en
+ *     la hoja no se reescriben nunca.
  *   - Duplicados: si un nombre normalizado aparece más de una vez en la hoja o
  *     en el CSV, todas las filas afectadas quedan con el curso en blanco y
  *     TEXTO_DUPLICADO en COL_CURSO_EXTRA (si el CSV tiene más repeticiones que
@@ -133,17 +184,48 @@
  *     actualizados, nuevos, no encontrados, duplicados, líneas ignoradas y
  *     cursos no reconocidos y estudiantes con el curso vacío). NO se listan
  *     nombres de estudiantes.
- *   - CONTROL DE COINCIDENCIAS: en processCsv_, si tras procesar
+ *   - CONTROL DE COINCIDENCIAS: en procesarCursos_, si tras procesar
  *     UMBRAL_CONTROL_COINCIDENCIAS estudiantes de la hoja (150 por defecto)
  *     ninguno ha coincidido con el CSV, se muestra un aviso (Sí/No) para
  *     continuar o abortar. Se pregunta una sola vez y siempre antes de
  *     escribir nada en la hoja, así que abortar no modifica nada.
  *
+ * REGLAS DE NEGOCIO DEL PASO 2 (datos personales)
+ *   - Comparación ESTRICTA (sin búsquedas aproximadas ni preguntas): el campo
+ *     "Alumno/a" del CSV se compara con NOMBRE + APELLIDO1 + APELLIDO2 de la hoja
+ *     (en ese orden, columnas C + A + B), ambos normalizados con
+ *     normalizarNombreEstricto_: sin tildes ni diacríticos (ñ -> n), minúsculas,
+ *     cualquier carácter que no sea letra, número o espacio pasa a espacio, y
+ *     espacios múltiples colapsados. (Es distinta de la normalización del paso 1,
+ *     que NO se debe cambiar: allí la clave es apellido1 + apellido2 + nombre.)
+ *   - Nombre idéntico y único -> se copian a la hoja la fecha de nacimiento
+ *     (COL_FECHA_NACIMIENTO), el país (COL_PAIS) y la nacionalidad
+ *     (COL_NACIONALIDAD): se rellenan si estaban vacías y se actualizan si ya
+ *     tenían un valor.
+ *   - Nombre no idéntico -> NO se hace nada. Los estudiantes de la hoja sin
+ *     coincidencia no se tocan, y los del CSV que no están en la hoja se ignoran
+ *     (este paso NUNCA añade filas ni cambia nombres, cursos ni incidencias).
+ *   - Nombre repetido en la hoja o en el CSV (ambiguo) -> NO se toca a esos
+ *     estudiantes y se cuentan en el resumen.
+ *   - Si el valor del CSV viene vacío se conserva lo que haya en la hoja
+ *     (SOBRESCRIBIR_CON_VACIOS = false).
+ *   - La fecha se convierte a fecha real (CONVERTIR_FECHA); si no se reconoce el
+ *     formato se copia el texto tal cual. País y nacionalidad se copian tal cual
+ *     vienen (sin cambiar mayúsculas ni tildes).
+ *   - Solo se reescriben las columnas en las que algún estudiante ha cambiado.
+ *   - Resumen solo con totales. Si hay estudiantes en la hoja pero ninguno
+ *     coincide con el CSV, el resumen lo avisa (CSV u hoja equivocados).
+ *
  * NOTAS TÉCNICAS PARA FUTURAS MEJORAS
  *   - Las lecturas/escrituras se hacen por bloques (getValues/setValues) por
  *     rendimiento; evitar leer/escribir celda a celda.
  *   - La columna de curso se reescribe completa en el rango de estudiantes
- *     existentes (si tuviera fórmulas, se convertirían en valores).
+ *     existentes (si tuviera fórmulas, se convertirían en valores). Lo mismo
+ *     ocurre en el paso 2 con las columnas de fecha de nacimiento, país y
+ *     nacionalidad; cada una se lee y escribe por separado para no tocar las
+ *     columnas intermedias.
+ *   - Las fechas se escriben como objeto Date a las 12:00 para que una diferencia
+ *     entre la zona horaria del script y la de la hoja no desplace el día.
  *   - El último estudiante es la última fila con contenido en las columnas de
  *     apellidos/nombre (no se usa getLastRow() a ciegas, porque otras columnas
  *     pueden tener datos más abajo).
@@ -184,6 +266,15 @@ const COL_CURSO = 'Q';
 /** Letra de la columna donde se copia el resto de la información del curso del CSV (grupo, "(R)", etc.) y donde se escriben las incidencias. */
 const COL_CURSO_EXTRA = 'R';
 
+/** Letra de la columna donde el paso 2 copia la fecha de nacimiento del CSV. */
+const COL_FECHA_NACIMIENTO = 'D';
+
+/** Letra de la columna donde el paso 2 copia el país del CSV. */
+const COL_PAIS = 'F';
+
+/** Letra de la columna donde el paso 2 copia la nacionalidad del CSV. */
+const COL_NACIONALIDAD = 'G';
+
 /** Valores válidos de la columna de curso en la hoja. Lo que no encaje en esta lista se marca como no reconocido. */
 const CURSOS_VALIDOS = ['1ESO', '2ESO', '3ESO', '4ESO', '1BTO', '2BTO', 'AE', 'FPB'];
 
@@ -203,17 +294,28 @@ const TEXTO_CURSO_VACIO = 'CURSO VACÍO';
 const NOMBRE_MENU = 'Estudiantes';
 
 /**
- * Si es true, un estudiante de la hoja cuyo nombre tiene solo parte de los nombres del CSV (ej. hoja "PEDRAZA CANDIA LINDAH"
- * y CSV "PEDRAZA CANDIA, LINDAH CHARLOTTE") se considera el mismo si los apellidos coinciden exactamente, los nombres de la hoja
- * son el principio del nombre del CSV y la coincidencia es única (sin ambigüedad). Solo se aplica a los que no coinciden exactamente.
- */
-const COINCIDIR_POR_NOMBRE_PARCIAL = true;
-
-/**
  * Si es true, para cada estudiante de la hoja sin coincidencia pero con los mismos apellidos en el CSV se muestra un aviso
  * para confirmar si es el mismo (actualizar nombre y curso / solo curso / no es el mismo).
  */
 const CONFIRMAR_MISMOS_APELLIDOS = true;
+
+/**
+ * (Paso 1) Minutos de ejecución tras los cuales, en lugar de la siguiente pregunta de confirmación, se avisa de que Apps Script
+ * limita cada ejecución a 6 minutos y se recomienda guardar lo respondido y volver a lanzar el paso 1.
+ */
+const MINUTOS_AVISO_LIMITE = 5;
+
+/**
+ * (Paso 2) Si es true, la fecha de nacimiento se escribe como fecha real de la hoja (acepta dd/mm/aaaa, dd-mm-aaaa, dd.mm.aaaa y aaaa-mm-dd).
+ * Si es false, o si el formato no se reconoce, se copia el texto tal cual viene en el CSV.
+ */
+const CONVERTIR_FECHA = true;
+
+/**
+ * (Paso 2) Si es false, cuando el CSV trae vacía la fecha de nacimiento, el país o la nacionalidad se conserva lo que ya hubiera en la hoja.
+ * Si es true, se borra el valor de la hoja. (No afecta a la columna de curso del paso 1, que siempre se escribe.)
+ */
+const SOBRESCRIBIR_CON_VACIOS = false;
 
 /** Si tras procesar este número de estudiantes de la hoja ninguno ha coincidido con el CSV, se avisa y se permite continuar o abortar. */
 const UMBRAL_CONTROL_COINCIDENCIAS = 150;
@@ -223,14 +325,66 @@ const UMBRAL_CONTROL_COINCIDENCIAS = 150;
  * CONFIGURACIÓN DEL CSV
  * -------------------------------------------------------------------------- */
 
-/** Índice (base 0) del campo "número de orden" dentro de cada línea del CSV (se ignora, solo se valida que sea numérico). */
-const CSV_IDX_NUMERO = 0;
+/** Si es true, la primera línea con contenido de cada CSV es un encabezado: se comprueba y se salta. */
+const CSV_TIENE_CABECERA = true;
 
-/** Índice (base 0) del campo "APELLIDOS , NOMBRE" dentro de cada línea del CSV. */
-const CSV_IDX_NOMBRE_COMPLETO = 1;
+/* --- CSV del PASO 1 (cursos): "NIF/Pasaporte","Apellidos","Nombre","Sección" --- */
 
-/** Índice (base 0) del campo "curso" dentro de cada línea del CSV. */
-const CSV_IDX_CURSO = 2;
+/** Índice (base 0) del campo "Apellidos" en el CSV de cursos. */
+const CSV_CURSOS_IDX_APELLIDOS = 1;
+
+/** Índice (base 0) del campo "Nombre" en el CSV de cursos. */
+const CSV_CURSOS_IDX_NOMBRE = 2;
+
+/** Índice (base 0) del campo "Sección" (curso) en el CSV de cursos. */
+const CSV_CURSOS_IDX_CURSO = 3;
+
+/* --- CSV del PASO 2 (datos personales): "Nº","Alumno/a","NIF/Pasaporte","Fecha nacimiento","Localidad","Provincia","País","NACIONALIDAD" --- */
+
+/** Índice (base 0) del campo "Alumno/a" (nombre seguido de apellidos, en un solo campo) en el CSV de datos personales. */
+const CSV_DATOS_IDX_NOMBRE_COMPLETO = 1;
+
+/** Índice (base 0) del campo "Fecha nacimiento" en el CSV de datos personales. */
+const CSV_DATOS_IDX_FECHA_NACIMIENTO = 3;
+
+/** Índice (base 0) del campo "País" en el CSV de datos personales. */
+const CSV_DATOS_IDX_PAIS = 6;
+
+/** Índice (base 0) del campo "NACIONALIDAD" en el CSV de datos personales. */
+const CSV_DATOS_IDX_NACIONALIDAD = 7;
+
+/**
+ * Descripción de cada formato de CSV. La usan prepararFilasCsv_ y los mensajes de error.
+ *  - cabecerasEsperadas: nombre que debe tener en el encabezado cada columna usada (se compara sin tildes ni mayúsculas).
+ *    Protege de que, si cambia el orden de las columnas, se lean o copien datos de la columna equivocada.
+ *  - esLineaValida: indica si una línea ya separada en campos tiene la estructura esperada.
+ */
+const FORMATO_CSV_CURSOS = {
+  paso: 'paso 1 (cursos)',
+  cabecera: '"NIF/Pasaporte","Apellidos","Nombre","Sección"',
+  ejemplo: '"12345678Z","ORBULESCU","ANA MARÍA","ESO1A"',
+  descripcion: 'Se usan apellidos, nombre y sección (curso). El NIF/Pasaporte se ignora.',
+  cabecerasEsperadas: [
+    { idx: CSV_CURSOS_IDX_APELLIDOS, nombre: 'Apellidos' },
+    { idx: CSV_CURSOS_IDX_NOMBRE,    nombre: 'Nombre' },
+    { idx: CSV_CURSOS_IDX_CURSO,     nombre: 'Sección' }
+  ],
+  esLineaValida: esLineaCursosValida_
+};
+
+const FORMATO_CSV_DATOS = {
+  paso: 'paso 2 (datos personales)',
+  cabecera: '"Nº","Alumno/a","NIF/Pasaporte","Fecha nacimiento","Localidad","Provincia","País","NACIONALIDAD"',
+  ejemplo: '"18","ANA MARÍA ORBULESCU","12345678Z","03/05/2009","MADRID","MADRID","ESPAÑA","RUMANA"',
+  descripcion: 'Se usan Alumno/a (nombre y apellidos en ese orden, sin coma), fecha de nacimiento, país y nacionalidad.',
+  cabecerasEsperadas: [
+    { idx: CSV_DATOS_IDX_NOMBRE_COMPLETO,  nombre: 'Alumno/a' },
+    { idx: CSV_DATOS_IDX_FECHA_NACIMIENTO, nombre: 'Fecha nacimiento' },
+    { idx: CSV_DATOS_IDX_PAIS,             nombre: 'País' },
+    { idx: CSV_DATOS_IDX_NACIONALIDAD,     nombre: 'NACIONALIDAD' }
+  ],
+  esLineaValida: esLineaDatosValida_
+};
 
 /** Proporción mínima (0 a 1) de líneas no vacías del CSV que deben tener la estructura esperada; si hay menos, se muestra un error y no se modifica nada. */
 const PORCENTAJE_MIN_LINEAS_VALIDAS = 0.9;
@@ -270,19 +424,45 @@ const REGLAS_NIVEL = [
 function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu(NOMBRE_MENU)
-    .addItem('Actualizar desde CSV', 'actualizarEstudiantes')
+    .addItem('Paso 1: Actualizar cursos desde CSV', 'actualizarCursos')
+    .addItem('Paso 2: Completar fecha de nacimiento, país y nacionalidad', 'actualizarDatosPersonales')
     .addToUi();
 }
 
-/** Punto de entrada: avisa de la hoja de destino, pide el CSV y procesa. */
-function actualizarEstudiantes() {
+/** Paso 1: actualiza el curso (y añade/marca estudiantes) a partir del CSV de cursos. */
+function actualizarCursos() {
+  ejecutarPaso_(
+    'Paso 1: cursos',
+    'el CSV de cursos (NIF/Pasaporte, Apellidos, Nombre, Sección)',
+    procesarCursos_
+  );
+}
+
+/** Paso 2: rellena fecha de nacimiento, país y nacionalidad a partir del CSV de datos personales. */
+function actualizarDatosPersonales() {
+  ejecutarPaso_(
+    'Paso 2: datos personales',
+    'el CSV de datos personales (Nº, Alumno/a, NIF/Pasaporte, Fecha nacimiento, ..., NACIONALIDAD)',
+    procesarDatosPersonales_
+  );
+}
+
+/**
+ * Flujo común a los dos pasos: avisa de la hoja de destino, pide el CSV, lo valida y ejecuta el proceso.
+ * @param {string} titulo Título del paso (para los cuadros de diálogo).
+ * @param {string} descripcionCsv Descripción del CSV que se pide.
+ * @param {function(GoogleAppsScript.Spreadsheet.Sheet, string, Object, number): string} procesar
+ *   Función que procesa el CSV y devuelve el resumen (recibe también la hora de inicio, en ms).
+ */
+function ejecutarPaso_(titulo, descripcionCsv, procesar) {
+  const inicio = Date.now();   // para el aviso del límite de tiempo de Apps Script
   const ui = SpreadsheetApp.getUi();
   const sheet = SpreadsheetApp.getActiveSheet();
   const sheetName = sheet.getName();
 
   // 1. Aviso de la hoja de destino
   const confirmacion = ui.alert(
-    'Hoja de destino',
+    titulo + ' - Hoja de destino',
     'Los datos se escribirán en la hoja:\n\n"' + sheetName + '"\n\n¿Quieres continuar?',
     ui.ButtonSet.YES_NO
   );
@@ -290,8 +470,8 @@ function actualizarEstudiantes() {
 
   // 2. Pedir el CSV
   const respuesta = ui.prompt(
-    'Archivo CSV',
-    'Sube antes el CSV a Google Drive y pega aquí el enlace de ' +
+    titulo + ' - Archivo CSV',
+    'Sube antes ' + descripcionCsv + ' a Google Drive y pega aquí el enlace de ' +
     '𝗖𝗼𝗺𝗽𝗮𝗿𝘁𝗶𝗿 → 𝗖𝗼𝗽𝗶𝗮𝗿 𝗲𝗻𝗹𝗮𝗰𝗲',
     ui.ButtonSet.OK_CANCEL
   );
@@ -317,9 +497,9 @@ function actualizarEstudiantes() {
     }
 
     const csvText = leerCsv_(archivo.file);
-    const resumen = processCsv_(sheet, csvText, archivo);
+    const resumen = (archivo.aviso ? archivo.aviso + '\n\n' : '') + procesar(sheet, csvText, archivo, inicio);
     Logger.log(resumen);
-    ui.alert('Resumen', resumen, ui.ButtonSet.OK);
+    ui.alert(titulo + ' - Resumen', resumen, ui.ButtonSet.OK);
   } catch (e) {
     ui.alert('Error', 'No se ha completado el proceso:\n\n' + e.message, ui.ButtonSet.OK);
   }
@@ -413,53 +593,67 @@ function leerCsv_(file) {
 }
 
 /**
- * Indica si una línea del CSV tiene la estructura esperada:
- *  - al menos 3 campos,
- *  - campo de número de orden formado solo por dígitos,
- *  - campo de nombre con formato "APELLIDOS , NOMBRE" (una coma con texto a ambos lados).
- * El campo del curso puede venir vacío (se marcará como curso no reconocido).
+ * Indica si una línea del CSV de cursos (paso 1) tiene la estructura esperada:
+ * campos suficientes para el índice mayor usado y apellidos y nombre no vacíos.
+ * El curso (sección) puede venir vacío (se marcará como curso vacío).
  * @param {string[]} row Campos de la línea ya separados.
  * @return {boolean}
  */
-function esLineaCsvValida_(row) {
-  const minCampos = Math.max(CSV_IDX_NUMERO, CSV_IDX_NOMBRE_COMPLETO, CSV_IDX_CURSO) + 1;
+function esLineaCursosValida_(row) {
+  const minCampos = Math.max(CSV_CURSOS_IDX_APELLIDOS, CSV_CURSOS_IDX_NOMBRE, CSV_CURSOS_IDX_CURSO) + 1;
   if (row.length < minCampos) return false;
-  if (!/^\d+$/.test(String(row[CSV_IDX_NUMERO]).trim())) return false;
-
-  const texto = String(row[CSV_IDX_NOMBRE_COMPLETO]);
-  const pos = texto.indexOf(',');
-  if (pos < 0) return false;
-  return collapse_(texto.substring(0, pos)) !== '' && collapse_(texto.substring(pos + 1)) !== '';
+  return collapse_(row[CSV_CURSOS_IDX_APELLIDOS]) !== '' && collapse_(row[CSV_CURSOS_IDX_NOMBRE]) !== '';
 }
 
-/** Mensaje de error estándar que explica cómo debe ser el CSV. */
-function mensajeEstructuraCsv_(detalle) {
-  return 'El CSV no tiene la estructura esperada. No se ha modificado nada.\n\n' +
-    'Debe ser un CSV sin fila de encabezado, con una línea por estudiante y 3 campos entre comillas ' +
-    'separados por comas:\n\n' +
-    '    "18","ORBULESCU , ANA MARÍA","ESO1A"\n\n' +
-    '  1) número de orden (solo dígitos; se ignora)\n' +
-    '  2) apellidos y nombre separados por una coma\n' +
-    '  3) curso\n\n' + detalle;
+/**
+ * Indica si una línea del CSV de datos personales (paso 2) tiene la estructura esperada:
+ * campos suficientes para el índice mayor usado y "Alumno/a" no vacío.
+ * @param {string[]} row Campos de la línea ya separados.
+ * @return {boolean}
+ */
+function esLineaDatosValida_(row) {
+  const minCampos = Math.max(
+    CSV_DATOS_IDX_NOMBRE_COMPLETO, CSV_DATOS_IDX_FECHA_NACIMIENTO,
+    CSV_DATOS_IDX_PAIS, CSV_DATOS_IDX_NACIONALIDAD
+  ) + 1;
+  if (row.length < minCampos) return false;
+  return collapse_(row[CSV_DATOS_IDX_NOMBRE_COMPLETO]) !== '';
+}
+
+/**
+ * Mensaje de error estándar que explica cómo debe ser el CSV del paso indicado.
+ * @param {Object} formato FORMATO_CSV_CURSOS o FORMATO_CSV_DATOS.
+ * @param {string} detalle Qué ha fallado.
+ */
+function mensajeEstructuraCsv_(formato, detalle) {
+  return 'El CSV no tiene la estructura esperada para el ' + formato.paso + '. No se ha modificado nada.\n\n' +
+    'Debe ser un CSV con una línea de encabezado y después una línea por estudiante, con los campos entre ' +
+    'comillas separados por comas:\n\n' +
+    formato.cabecera + '\n' +
+    formato.ejemplo + '\n\n' +
+    formato.descripcion + '\n\n' + detalle;
 }
 
 /**
  * Valida la estructura del CSV ya separado en filas. Lanza un Error explicando cómo debe ser
  * si no hay filas o si menos de PORCENTAJE_MIN_LINEAS_VALIDAS de las líneas no vacías son válidas.
  * @param {string[][]} csvRows
+ * @param {number} idxCabecera Índice de la fila de encabezado (se excluye del recuento), o -1 si no hay.
+ * @param {Object} formato FORMATO_CSV_CURSOS o FORMATO_CSV_DATOS.
  */
-function validarEstructuraCsv_(csvRows) {
+function validarEstructuraCsv_(csvRows, idxCabecera, formato) {
   const noVacias = [];
   csvRows.forEach(function (row, i) {
+    if (i <= idxCabecera) return;   // encabezado (y posibles líneas vacías previas)
     const vacia = row.every(function (c) { return String(c).trim() === ''; });
     if (!vacia) noVacias.push({ row: row, linea: i + 1 });
   });
 
   if (noVacias.length === 0) {
-    throw new Error(mensajeEstructuraCsv_('El archivo no contiene ninguna línea con datos.'));
+    throw new Error(mensajeEstructuraCsv_(formato, 'El archivo no contiene ninguna línea con datos.'));
   }
 
-  const invalidas = noVacias.filter(function (x) { return !esLineaCsvValida_(x.row); });
+  const invalidas = noVacias.filter(function (x) { return !formato.esLineaValida(x.row); });
   const validas = noVacias.length - invalidas.length;
 
   if (validas / noVacias.length < PORCENTAJE_MIN_LINEAS_VALIDAS) {
@@ -467,12 +661,50 @@ function validarEstructuraCsv_(csvRows) {
       const texto = x.row.join(' | ');
       return '  Línea ' + x.linea + ': ' + (texto.length > 70 ? texto.substring(0, 70) + '…' : texto);
     });
-    throw new Error(mensajeEstructuraCsv_(
+    throw new Error(mensajeEstructuraCsv_(formato,
       'Líneas válidas: ' + validas + ' de ' + noVacias.length +
       ' (se exige al menos el ' + Math.round(PORCENTAJE_MIN_LINEAS_VALIDAS * 100) + '%).\n\n' +
       'Ejemplos de líneas incorrectas (campos separados por " | "):\n' + ejemplos.join('\n')
     ));
   }
+}
+
+/**
+ * Separa el CSV en filas, comprueba el encabezado y la estructura (lanza un Error explicativo si algo
+ * no es válido) y devuelve las líneas válidas. Es común a los dos pasos.
+ * @param {string} csvText Contenido del CSV ya decodificado.
+ * @param {Object} formato FORMATO_CSV_CURSOS o FORMATO_CSV_DATOS.
+ * @return {{validas: string[][], ignoradas: string[]}} Filas válidas (sin encabezado ni líneas vacías)
+ *   y descripción de las líneas inválidas que se ignoran.
+ */
+function prepararFilasCsv_(csvText, formato) {
+  let csvRows;
+  try {
+    csvRows = Utilities.parseCsv(csvText.replace(/^\uFEFF/, ''));
+  } catch (e) {
+    throw new Error(mensajeEstructuraCsv_(formato, 'No se ha podido separar el contenido en campos (' + e.message + ').'));
+  }
+
+  const idxCabecera = indiceCabecera_(csvRows);
+  if (idxCabecera >= 0) {
+    const problemaCabecera = comprobarCabecera_(csvRows[idxCabecera], formato);
+    if (problemaCabecera) throw new Error(mensajeEstructuraCsv_(formato, problemaCabecera));
+  }
+  validarEstructuraCsv_(csvRows, idxCabecera, formato);
+
+  const validas = [];
+  const ignoradas = [];
+  csvRows.forEach(function (row, i) {
+    if (i <= idxCabecera) return;   // encabezado
+    const vacia = row.every(function (c) { return String(c).trim() === ''; });
+    if (vacia) return;
+    if (!formato.esLineaValida(row)) {
+      ignoradas.push('Línea ' + (i + 1) + ': ' + row.join(','));
+      return;
+    }
+    validas.push(row);
+  });
+  return { validas: validas, ignoradas: ignoradas };
 }
 
 /**
@@ -507,13 +739,15 @@ function comprobarEsCsv_(file) {
  * ========================================================================== */
 
 /**
- * Procesa el CSV y actualiza la hoja indicada.
+ * PASO 1. Procesa el CSV de cursos y actualiza la hoja indicada.
  * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet Hoja de destino.
  * @param {string} csvText Contenido del CSV (ya decodificado).
  * @param {{file: GoogleAppsScript.Drive.File, aviso: string}} archivo Datos del archivo origen (para el resumen).
+ * @param {number} [inicio] Hora de inicio de la ejecución en ms (Date.now()); por defecto, la de esta llamada.
  * @return {string} Resumen para mostrar al usuario.
  */
-function processCsv_(sheet, csvText, archivo) {
+function procesarCursos_(sheet, csvText, archivo, inicio) {
+  inicio = inicio || Date.now();
   const sheetName = sheet.getName();
   const colA1 = colIndex_(COL_APELLIDO1);
   const colA2 = colIndex_(COL_APELLIDO2);
@@ -523,37 +757,19 @@ function processCsv_(sheet, csvText, archivo) {
   const firstRow = HEADER_ROWS + 1;
 
   // ---------- 1. Leer y parsear el CSV ----------
-  const lineasIgnoradas = [];
+  // Comprueba el encabezado y la estructura (lanza un error explicando el formato esperado si no es válido)
+  const preparado = prepararFilasCsv_(csvText, FORMATO_CSV_CURSOS);
+  const lineasIgnoradas = preparado.ignoradas;
   const csvEntries = [];                 // en orden del CSV
   const csvMap = new Map();              // key -> [entries]
 
-  let csvRows;
-  try {
-    csvRows = Utilities.parseCsv(csvText.replace(/^\uFEFF/, ''));
-  } catch (e) {
-    throw new Error(mensajeEstructuraCsv_('No se ha podido separar el contenido en campos (' + e.message + ').'));
-  }
-  validarEstructuraCsv_(csvRows);   // lanza un error explicando el formato esperado si no es válido
+  preparado.validas.forEach(function (row) {
+    const apellidos = collapse_(row[CSV_CURSOS_IDX_APELLIDOS]);
+    const nombre = collapse_(row[CSV_CURSOS_IDX_NOMBRE]);
 
-  csvRows.forEach(function (row, i) {
-    const vacia = row.every(function (c) { return String(c).trim() === ''; });
-    if (vacia) return;
-
-    if (!esLineaCsvValida_(row)) {
-      lineasIgnoradas.push('Línea ' + (i + 1) + ': ' + row.join(','));
-      return;
-    }
-
-    const nombreCompleto = row[CSV_IDX_NOMBRE_COMPLETO];
-
-    const texto = String(nombreCompleto);
-    const posComa = texto.indexOf(',');
-    const apellidos = collapse_(posComa >= 0 ? texto.substring(0, posComa) : texto);
-    const nombre = collapse_(posComa >= 0 ? texto.substring(posComa + 1) : '');
-
-    const cursoInfo = parsearCurso_(row[CSV_IDX_CURSO]);
+    const cursoInfo = parsearCurso_(row[CSV_CURSOS_IDX_CURSO]);
     const entry = {
-      key: normalize_(texto),
+      key: normalize_(apellidos + ' ' + nombre),
       apeKey: normalize_(apellidos),
       nomKey: normalize_(nombre),
       apellidos: apellidos.toLocaleUpperCase('es'),
@@ -562,7 +778,7 @@ function processCsv_(sheet, csvText, archivo) {
       extra: cursoInfo.extra,
       cursoReconocido: cursoInfo.reconocido,
       cursoVacio: cursoInfo.vacio,
-      cursoOriginal: collapse_(row[CSV_IDX_CURSO])
+      cursoOriginal: collapse_(row[CSV_CURSOS_IDX_CURSO])
     };
     csvEntries.push(entry);
     if (!csvMap.has(entry.key)) csvMap.set(entry.key, []);
@@ -574,25 +790,10 @@ function processCsv_(sheet, csvText, archivo) {
   }
 
   // ---------- 2. Leer estudiantes de la hoja ----------
-  const lastSheetRow = sheet.getLastRow();
-  const numRows = Math.max(lastSheetRow - firstRow + 1, 0);
-
-  let ap1 = [], ap2 = [], nom = [];
-  if (numRows > 0) {
-    ap1 = sheet.getRange(firstRow, colA1, numRows, 1).getValues();
-    ap2 = sheet.getRange(firstRow, colA2, numRows, 1).getValues();
-    nom = sheet.getRange(firstRow, colNom, numRows, 1).getValues();
-  }
-
-  // Último estudiante = última fila con algo en apellidos/nombre
-  let lastStudentIdx = -1;
-  for (let i = 0; i < numRows; i++) {
-    if (String(ap1[i][0]).trim() || String(ap2[i][0]).trim() || String(nom[i][0]).trim()) {
-      lastStudentIdx = i;
-    }
-  }
-  const numStudents = lastStudentIdx + 1;
-  const lastStudentRow = firstRow + lastStudentIdx;     // si no hay estudiantes = firstRow - 1
+  const hoja = leerEstudiantesHoja_(sheet);
+  const ap1 = hoja.ap1, ap2 = hoja.ap2, nom = hoja.nom;
+  const numStudents = hoja.numStudents;
+  const lastStudentRow = hoja.lastStudentRow;     // si no hay estudiantes = firstRow - 1
 
   const sheetKeys = [];                  // key por fila ('' si la fila está vacía)
   const sheetMap = new Map();            // key -> [índices]
@@ -607,100 +808,102 @@ function processCsv_(sheet, csvText, archivo) {
     sheetMap.get(key).push(i);
   }
 
-  // ---------- 2b. Coincidencia por nombre parcial ----------
-  // La hoja a veces solo tiene el primer nombre y el CSV el nombre completo. Para los estudiantes de la
-  // hoja sin coincidencia exacta se busca en el CSV uno con los mismos apellidos cuyo nombre empiece por
-  // los nombres de la hoja. Solo se acepta si el candidato es único y ninguna otra fila de la hoja lo
-  // reclama. Al aceptarlo, la fila de la hoja pasa a usar la clave del CSV y el resto del proceso
-  // (actualizar, duplicados, nuevos) funciona igual que con una coincidencia exacta.
+  // ---------- 2b. Confirmación manual: mismos apellidos, nombre distinto ----------
+  // Para los estudiantes de la hoja sin coincidencia exacta que tienen en el CSV una entrada con los
+  // mismos apellidos (y que no coincide ya con otra fila de la hoja), se pregunta al usuario si es el mismo:
+  //   Sí (YES)         -> actualizar SOLO el nombre (columna C) y el curso; los apellidos de la hoja no se tocan
+  //   No (NO)          -> actualizar solo el curso (el nombre de la hoja no se toca), previa segunda confirmación Sí/No
+  //   Cancelar / cerrar -> no es el mismo estudiante; se prueba el siguiente candidato (si lo hay) y se continúa
+  // Todavía no se ha escrito nada en la hoja: las respuestas solo se aplican en el paso 5.
   const csvPorApellidos = new Map();   // apeKey -> [entries]
   csvEntries.forEach(function (e) {
     if (!csvPorApellidos.has(e.apeKey)) csvPorApellidos.set(e.apeKey, []);
     csvPorApellidos.get(e.apeKey).push(e);
   });
 
-  /** Reconstruye el índice de la hoja (clave -> filas) tras cambiar claves. */
-  function reconstruirSheetMap() {
-    sheetMap.clear();
-    for (let i = 0; i < numStudents; i++) {
-      if (sheetKeys[i] === '') continue;
-      if (!sheetMap.has(sheetKeys[i])) sheetMap.set(sheetKeys[i], []);
-      sheetMap.get(sheetKeys[i]).push(i);
-    }
-  }
-
-  let coincidenciasParciales = 0;
-  if (COINCIDIR_POR_NOMBRE_PARCIAL) {
-    const candidatoPorFila = new Map();  // índice de fila -> entry candidata
-    const reclamos = new Map();          // entry -> nº de filas de la hoja que la reclaman
-    for (let i = 0; i < numStudents; i++) {
-      const key = sheetKeys[i];
-      if (key === '' || csvMap.has(key)) continue;   // fila vacía o ya coincide exactamente
-
-      const apeKey = normalize_(ap1[i][0] + ' ' + ap2[i][0]);
-      const nomKey = normalize_(nom[i][0]);
-      if (apeKey === '' || nomKey === '') continue;
-
-      const candidatos = (csvPorApellidos.get(apeKey) || []).filter(function (e) {
-        return csvMap.get(e.key).length === 1 &&      // sin duplicados en el CSV
-               !sheetMap.has(e.key) &&                // no coincide ya exactamente con otra fila
-               nombreEsInicioDe_(nomKey, e.nomKey);
-      });
-      if (candidatos.length === 1) {
-        candidatoPorFila.set(i, candidatos[0]);
-        reclamos.set(candidatos[0], (reclamos.get(candidatos[0]) || 0) + 1);
-      }
-    }
-
-    candidatoPorFila.forEach(function (entry, i) {
-      if (reclamos.get(entry) !== 1) return;         // reclamada por varias filas: ambigua
-      sheetKeys[i] = entry.key;
-      coincidenciasParciales++;
+  /** Entradas del CSV con los mismos apellidos que la fila i (sin duplicados en el CSV); [] si la fila ya está emparejada o vacía. */
+  function candidatosDeFila(i) {
+    const key = sheetKeys[i];
+    if (key === '' || csvMap.has(key)) return [];   // fila vacía o ya emparejada
+    const apeKey = normalize_(ap1[i][0] + ' ' + ap2[i][0]);
+    if (apeKey === '') return [];
+    return (csvPorApellidos.get(apeKey) || []).filter(function (e) {
+      return csvMap.get(e.key).length === 1;        // sin duplicados en el CSV
     });
-    reconstruirSheetMap();
   }
 
-  // ---------- 2c. Confirmación manual: mismos apellidos, nombre distinto ----------
-  // Para los estudiantes de la hoja que siguen sin coincidencia pero tienen en el CSV una entrada con los
-  // mismos apellidos (y que no coincide ya con otra fila de la hoja), se pregunta al usuario si es el mismo:
-  //   Sí (YES)         -> actualizar el nombre en la hoja con el del CSV y el curso
-  //   No (NO)          -> actualizar solo el curso (el nombre de la hoja no se toca), previa segunda confirmación Sí/No
-  //   Cancelar / cerrar -> no es el mismo estudiante; se prueba el siguiente candidato (si lo hay) y se continúa
-  // Todavía no se ha escrito nada en la hoja: las respuestas solo se aplican en el paso 5.
+  // Total previsto de preguntas (para el contador "pregunta X/N"): filas con algún candidato libre. Es aproximado.
+  let totalPreguntas = 0;
+  if (CONFIRMAR_MISMOS_APELLIDOS) {
+    for (let i = 0; i < numStudents; i++) {
+      const hayCandidatoLibre = candidatosDeFila(i).some(function (e) { return !sheetMap.has(e.key); });
+      if (hayCandidatoLibre) totalPreguntas++;
+    }
+  }
+
   let confirmadosNombreYCurso = 0;
   let confirmadosSoloCurso = 0;
   let cambioNombres = false;
+  let numPregunta = 0;               // filas por las que se ha empezado a preguntar
+  let interrumpido = false;          // true si se detiene la confirmación por el límite de tiempo (guardado parcial)
+  let preguntasPendientes = 0;
+  let avisoTiempoMostrado = false;
   if (CONFIRMAR_MISMOS_APELLIDOS) {
     const ui = SpreadsheetApp.getUi();
     for (let i = 0; i < numStudents; i++) {
-      const key = sheetKeys[i];
-      if (key === '' || csvMap.has(key)) continue;   // fila vacía o ya emparejada
-
-      const apeKey = normalize_(ap1[i][0] + ' ' + ap2[i][0]);
-      if (apeKey === '') continue;
-
-      const candidatos = (csvPorApellidos.get(apeKey) || []).filter(function (e) {
-        return csvMap.get(e.key).length === 1;       // sin duplicados en el CSV
-      });
+      const candidatos = candidatosDeFila(i);
+      let filaContada = false;
 
       for (let c = 0; c < candidatos.length; c++) {
         const e = candidatos[c];
         if (sheetMap.has(e.key)) continue;           // ya emparejada con otra fila (o confirmada antes)
+
+        // Aviso del límite de 6 minutos de Apps Script, en lugar de la siguiente pregunta
+        if (!avisoTiempoMostrado && (Date.now() - inicio) >= MINUTOS_AVISO_LIMITE * 60 * 1000) {
+          avisoTiempoMostrado = true;
+          const pendientes = Math.max(totalPreguntas - numPregunta + (filaContada ? 1 : 0), 1);
+          const decision = ui.alert(
+            '⌛Límite de tiempo de Apps Script⌛',
+            'Llevas más de ' + MINUTOS_AVISO_LIMITE + ' minutos en esta ejecución.\n\n' +
+            'Google Apps Script limita cada ejecución a 6 minutos. Si se supera, el proceso se corta y se ' +
+            'pierden TODAS las respuestas dadas hasta ahora.\n\n' +
+            'Recomendamos guardar los avances y volver a lanzar el Paso 1 desde el menú para continuar con el ' +
+            'resto (quedan unas ' + pendientes + ' preguntas de ' + totalPreguntas + ').\n\n' +
+            'Sí  =  Guardar los avances y detener (recomendado)\n' +
+            'No  =  Seguir preguntando (si se supera el límite se perderá todo)',
+            ui.ButtonSet.YES_NO
+          );
+          if (decision === ui.Button.YES) {
+            interrumpido = true;
+            preguntasPendientes = pendientes;
+            break;
+          }
+        }
+
+        if (!filaContada) { numPregunta++; filaContada = true; }
+
+        // Icono del aviso: ✅ si aparentemente solo falta parte del nombre en la hoja (el nombre de la hoja es el
+        // principio del nombre del CSV, ej. "DULCE" frente a "DULCE ZOE"); ⚠️ en cualquier otro caso (hermanos, erratas...)
+        const nomHoja = normalize_(nom[i][0]);
+        const icono = (nomHoja !== '' && nombreEsInicioDe_(nomHoja, e.nomKey)) ? '✅' : '⚠️';
+        // Con ⚠️ se deja un salto de línea más antes de "Hoja:" y antes de "¿Es el mismo estudiante?" para que el cuadro
+        // se vea distinto a simple vista
+        const separacion = (icono === '✅') ? '\n\n' : '\n\n\n';
 
         let respuesta;
         let preguntar = true;
         while (preguntar) {
           preguntar = false;
           respuesta = ui.alert(
-          'Estudiante no encontrado',
-          'No se ha encontrado este estudiante, pero he encontrado este con los mismos apellidos en el CSV\n\n' +
-          '"' + sheetNames[i] + '" (fila ' + (firstRow + i) + ')\n' +
-          '"' + e.apellidos + ', ' + e.nombre + '" (curso en el CSV: ' + (e.cursoOriginal || 'vacío') + ')\n\n' +
-          'Necesito que me confirmes si es el mismo estudiante.\n' +
-          '(Por límites de configuración la respuesta NO es rara)\n\n' +
-          'Sí  =  Sí, actualiza el nombre y el curso\n' +
-          'No  =  Este NO es un NO ACTUALICES EL NOMBRE (lo que haré es actualizar solo el curso)\n' +
-          'Cancelar  =  Esto es NO ES EL MISMO, continúa ejecutando el script (no actualizo nada)',
+          'Estudiante no encontrado - pregunta ' + numPregunta + '/' + totalPreguntas,
+          icono + ' No se ha encontrado este estudiante, pero hay uno ' + icono + ' con los mismos apellidos en el CSV:' + separacion +
+          'Hoja:  "' + sheetNames[i] + '" (fila ' + (firstRow + i) + ')\n' +
+          'CSV:  "' + e.apellidos + ', ' + e.nombre + '" (curso en el CSV: ' + (e.cursoOriginal || 'vacío') + ')' + separacion +
+          '¿Es el mismo estudiante?\n' +
+          '(Los botones de Apps Script no se pueden renombrar, por eso se explican aquí)\n\n' +
+          'Sí  =  Es el mismo: actualizar el nombre y el curso (los apellidos no se tocan)\n' +
+          'No  =  Es el mismo, pero NO cambiar el nombre: actualizar solo el curso (te pediré confirmación)\n' +
+          'Cancelar  =  No es el mismo: no actualizar nada con esta entrada y continuar',
           ui.ButtonSet.YES_NO_CANCEL
           );
 
@@ -709,7 +912,7 @@ function processCsv_(sheet, csvText, archivo) {
           if (respuesta === ui.Button.NO) {
             const confirmaSoloCurso = ui.alert(
               'Confirmar: actualizar solo el curso',
-              'Se actualizará SOLO el curso del estudiante "' + sheetNames[i] +
+              'Se actualizará SOLO el curso del estudiante "' + sheetNames[i] + '".\n' +
               'El nombre en la hoja NO se modificará.\n\n' +
               '¿Confirmas?\n(Sí = confirmar, No = volver a la pregunta anterior)',
               ui.ButtonSet.YES_NO
@@ -722,10 +925,7 @@ function processCsv_(sheet, csvText, archivo) {
           sheetKeys[i] = e.key;
           sheetMap.set(e.key, [i]);
           if (respuesta === ui.Button.YES) {
-            const sep = separarApellidos_(e.apellidos);
-            ap1[i][0] = sep.apellido1;
-            ap2[i][0] = sep.apellido2;
-            nom[i][0] = e.nombre;
+            nom[i][0] = e.nombre;           // solo el nombre: los apellidos de la hoja no se modifican
             cambioNombres = true;
             confirmadosNombreYCurso++;
           } else {
@@ -735,6 +935,7 @@ function processCsv_(sheet, csvText, archivo) {
         }
         // Cancelar o cerrar el cuadro: no es el mismo; se prueba el siguiente candidato
       }
+      if (interrumpido) break;
     }
   }
 
@@ -782,6 +983,7 @@ function processCsv_(sheet, csvText, archivo) {
     const csvList = csvMap.get(key);
     if (csvList) coincidencias++;
     if (!csvList) {
+      if (interrumpido) continue;   // guardado parcial: la fila aún puede tener pregunta pendiente, no se marca
       cursos[i][0] = '';
       extras[i][0] = TEXTO_NO_ENCONTRADO;
       noEncontrados.push(sheetNames[i]);
@@ -799,7 +1001,8 @@ function processCsv_(sheet, csvText, archivo) {
   // ---------- 4. Determinar estudiantes nuevos (en orden del CSV) ----------
   const nuevos = [];
   const vistos = new Map();
-  csvEntries.forEach(function (entry) {
+  // En guardado parcial no se añade ninguno: sus entradas podrían ser el emparejamiento de una pregunta pendiente
+  (interrumpido ? [] : csvEntries).forEach(function (entry) {
     const veces = (vistos.get(entry.key) || 0) + 1;
     vistos.set(entry.key, veces);
 
@@ -824,8 +1027,6 @@ function processCsv_(sheet, csvText, archivo) {
   }
 
   if (cambioNombres) {
-    sheet.getRange(firstRow, colA1, numStudents, 1).setValues(ap1.slice(0, numStudents));
-    sheet.getRange(firstRow, colA2, numStudents, 1).setValues(ap2.slice(0, numStudents));
     sheet.getRange(firstRow, colNom, numStudents, 1).setValues(nom.slice(0, numStudents));
   }
 
@@ -852,10 +1053,9 @@ function processCsv_(sheet, csvText, archivo) {
   const cursosNoReconocidos = csvEntries.filter(function (e) { return !e.cursoReconocido && !e.cursoVacio; }).length;
   const cursosVacios = csvEntries.filter(function (e) { return e.cursoVacio; }).length;
 
-  return [
+  const resumen = [
     'Estudiantes en el CSV: ' + csvEntries.length,
     'Actualizados (curso del CSV): ' + actualizados,
-    'Coincidencias por nombre parcial (incluidas en las anteriores): ' + coincidenciasParciales,
     'Confirmados por el usuario, nombre y curso actualizados (incluidos en las anteriores): ' + confirmadosNombreYCurso,
     'Confirmados por el usuario, solo curso actualizado (incluidos en las anteriores): ' + confirmadosSoloCurso,
     'Nuevos añadidos: ' + nuevos.length,
@@ -864,7 +1064,171 @@ function processCsv_(sheet, csvText, archivo) {
     'Líneas del CSV ignoradas: ' + lineasIgnoradas.length,
     'Cursos no reconocidos: ' + cursosNoReconocidos,
     'Estudiantes con el curso vacío: ' + cursosVacios
-  ].join('\n');
+  ];
+  if (interrumpido) {
+    resumen.unshift(
+      'GUARDADO PARCIAL por el límite de tiempo de Apps Script.',
+      'Se han guardado los estudiantes ya emparejados y tus respuestas. NO se han marcado estudiantes como no encontrados ' +
+        'ni se han añadido nuevos (se hará cuando termines).',
+      'Vuelve a lanzar el Paso 1 desde el menú para continuar con el resto (quedaban unas ' + preguntasPendientes + ' preguntas). ' +
+        'Los estudiantes a los que respondiste "No" o "Cancelar" se volverán a preguntar.',
+      ''
+    );
+  }
+  return resumen.join('\n');
+}
+
+
+/**
+ * PASO 2. Procesa el CSV de datos personales: para cada estudiante de la hoja cuyo nombre completo es
+ * IDÉNTICO (normalizado) al campo "Alumno/a" del CSV, copia la fecha de nacimiento, el país y la nacionalidad.
+ * No hace nada con los que no coinciden ni con los nombres repetidos, y nunca añade filas ni cambia nombres.
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet Hoja de destino.
+ * @param {string} csvText Contenido del CSV (ya decodificado).
+ * @param {{file: GoogleAppsScript.Drive.File, aviso: string}} archivo Datos del archivo origen.
+ * @return {string} Resumen para mostrar al usuario.
+ */
+function procesarDatosPersonales_(sheet, csvText, archivo) {
+  const colFecha = colIndex_(COL_FECHA_NACIMIENTO);
+  const colPais = colIndex_(COL_PAIS);
+  const colNac = colIndex_(COL_NACIONALIDAD);
+
+  // ---------- 1. Leer y parsear el CSV ----------
+  const preparado = prepararFilasCsv_(csvText, FORMATO_CSV_DATOS);
+  const csvEntries = [];
+  const csvMap = new Map();              // key -> [entries]
+
+  preparado.validas.forEach(function (row) {
+    const entry = {
+      key: normalizarNombreEstricto_(row[CSV_DATOS_IDX_NOMBRE_COMPLETO]),
+      fechaNacimiento: parsearFecha_(row[CSV_DATOS_IDX_FECHA_NACIMIENTO]),
+      pais: collapse_(row[CSV_DATOS_IDX_PAIS]),
+      nacionalidad: collapse_(row[CSV_DATOS_IDX_NACIONALIDAD])
+    };
+    if (entry.key === '') {
+      preparado.ignoradas.push('Línea sin nombre utilizable: ' + row.join(','));
+      return;
+    }
+    csvEntries.push(entry);
+    if (!csvMap.has(entry.key)) csvMap.set(entry.key, []);
+    csvMap.get(entry.key).push(entry);
+  });
+
+  if (csvEntries.length === 0) {
+    throw new Error('El CSV no contiene ningún estudiante válido. No se ha modificado nada.');
+  }
+
+  // ---------- 2. Leer estudiantes de la hoja ----------
+  // Clave de la hoja: NOMBRE + APELLIDO1 + APELLIDO2 (el CSV trae nombre y luego apellidos)
+  const hoja = leerEstudiantesHoja_(sheet);
+  const numStudents = hoja.numStudents;
+
+  const sheetKeys = [];
+  const sheetMap = new Map();            // key -> [índices de fila]
+  for (let i = 0; i < numStudents; i++) {
+    const key = normalizarNombreEstricto_([hoja.nom[i][0], hoja.ap1[i][0], hoja.ap2[i][0]].join(' '));
+    sheetKeys.push(key);
+    if (key === '') continue;
+    if (!sheetMap.has(key)) sheetMap.set(key, []);
+    sheetMap.get(key).push(i);
+  }
+
+  // ---------- 3. Copiar los datos de los estudiantes con nombre idéntico y único ----------
+  let fechas = [], paises = [], nacionalidades = [];
+  if (numStudents > 0) {
+    fechas = sheet.getRange(hoja.firstRow, colFecha, numStudents, 1).getValues();
+    paises = sheet.getRange(hoja.firstRow, colPais, numStudents, 1).getValues();
+    nacionalidades = sheet.getRange(hoja.firstRow, colNac, numStudents, 1).getValues();
+  }
+
+  let estudiantesHoja = 0;
+  let actualizados = 0;
+  let sinCoincidencia = 0;
+  const duplicados = new Set();
+  let cambioFecha = false, cambioPais = false, cambioNac = false;
+
+  for (let i = 0; i < numStudents; i++) {
+    const key = sheetKeys[i];
+    if (key === '') continue;
+    estudiantesHoja++;
+
+    const csvList = csvMap.get(key);
+    if (!csvList) {
+      sinCoincidencia++;
+      continue;
+    }
+    if (csvList.length > 1 || sheetMap.get(key).length > 1) {
+      duplicados.add(key);                // ambiguo: no se toca
+      continue;
+    }
+
+    const e = csvList[0];
+    const f = aplicarDato_(fechas, i, e.fechaNacimiento);
+    const p = aplicarDato_(paises, i, e.pais);
+    const n = aplicarDato_(nacionalidades, i, e.nacionalidad);
+    if (f) cambioFecha = true;
+    if (p) cambioPais = true;
+    if (n) cambioNac = true;
+    if (f || p || n) actualizados++;
+  }
+
+  const csvSinHoja = csvEntries.filter(function (e) { return !sheetMap.has(e.key); }).length;
+  const emparejados = estudiantesHoja - sinCoincidencia;   // incluye los duplicados (no tocados)
+
+  // ---------- 4. Escribir en la hoja (solo las columnas que han cambiado) ----------
+  if (cambioFecha) sheet.getRange(hoja.firstRow, colFecha, numStudents, 1).setValues(fechas);
+  if (cambioPais) sheet.getRange(hoja.firstRow, colPais, numStudents, 1).setValues(paises);
+  if (cambioNac) sheet.getRange(hoja.firstRow, colNac, numStudents, 1).setValues(nacionalidades);
+  SpreadsheetApp.flush();
+
+  // ---------- 5. Resumen ----------
+  const lineas = [];
+  if (estudiantesHoja > 0 && emparejados === 0) {
+    lineas.push('AVISO: ningún estudiante de la hoja coincide con el CSV. ¿Hoja o CSV equivocados?\n');
+  }
+  lineas.push(
+    'Estudiantes en el CSV: ' + csvEntries.length,
+    'Estudiantes en la hoja: ' + estudiantesHoja,
+    'Con fecha de nacimiento, país o nacionalidad rellenados/actualizados: ' + actualizados,
+    'Nombres repetidos (no modificados): ' + duplicados.size,
+    'Estudiantes de la hoja sin coincidencia en el CSV (no modificados): ' + sinCoincidencia,
+    'Estudiantes del CSV sin coincidencia en la hoja (ignorados): ' + csvSinHoja,
+    'Líneas del CSV ignoradas: ' + preparado.ignoradas.length
+  );
+  return lineas.join('\n');
+}
+
+/**
+ * Lee los estudiantes de la hoja (apellido 1, apellido 2 y nombre).
+ * El último estudiante es la última fila con algo en esas tres columnas (no se usa getLastRow() a ciegas).
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet
+ * @return {{firstRow: number, ap1: Array[], ap2: Array[], nom: Array[], numStudents: number, lastStudentRow: number}}
+ *   ap1/ap2/nom son matrices [[v], ...] con al menos numStudents filas; lastStudentRow = firstRow - 1 si no hay estudiantes.
+ */
+function leerEstudiantesHoja_(sheet) {
+  const firstRow = HEADER_ROWS + 1;
+  const lastSheetRow = sheet.getLastRow();
+  const numRows = Math.max(lastSheetRow - firstRow + 1, 0);
+
+  let ap1 = [], ap2 = [], nom = [];
+  if (numRows > 0) {
+    ap1 = sheet.getRange(firstRow, colIndex_(COL_APELLIDO1), numRows, 1).getValues();
+    ap2 = sheet.getRange(firstRow, colIndex_(COL_APELLIDO2), numRows, 1).getValues();
+    nom = sheet.getRange(firstRow, colIndex_(COL_NOMBRE), numRows, 1).getValues();
+  }
+
+  let lastStudentIdx = -1;
+  for (let i = 0; i < numRows; i++) {
+    if (String(ap1[i][0]).trim() || String(ap2[i][0]).trim() || String(nom[i][0]).trim()) {
+      lastStudentIdx = i;
+    }
+  }
+  return {
+    firstRow: firstRow,
+    ap1: ap1, ap2: ap2, nom: nom,
+    numStudents: lastStudentIdx + 1,
+    lastStudentRow: firstRow + lastStudentIdx
+  };
 }
 
 
@@ -926,8 +1290,8 @@ function interpretarNivel_(texto) {
 }
 
 /**
- * Indica si los nombres de la hoja son el principio de los nombres del CSV (y el CSV tiene más).
- * Ambos ya normalizados. Ej.: ("lindah", "lindah charlotte") -> true; ("charlotte", "lindah charlotte") -> false.
+ * Indica si los nombres de la hoja son el principio de los nombres del CSV (y el CSV tiene más palabras).
+ * Ambos ya normalizados. Ej.: ("dulce", "dulce zoe") -> true; ("zoe", "dulce zoe") -> false; ("luis", "pedro") -> false.
  * @param {string} nombreHoja
  * @param {string} nombreCsv
  * @return {boolean}
@@ -935,7 +1299,7 @@ function interpretarNivel_(texto) {
 function nombreEsInicioDe_(nombreHoja, nombreCsv) {
   const wh = nombreHoja.split(' ');
   const wc = nombreCsv.split(' ');
-  if (wh.length >= wc.length) return false;   // si tienen las mismas palabras, ya habría coincidido exactamente
+  if (wh.length >= wc.length) return false;   // con las mismas palabras ya habría coincidido exactamente
   for (let k = 0; k < wh.length; k++) {
     if (wh[k] !== wc[k]) return false;
   }
@@ -952,6 +1316,76 @@ function separarApellidos_(apellidos) {
   const palabras = collapse_(apellidos).split(' ').filter(function (p) { return p !== ''; });
   if (palabras.length === 2) return { apellido1: palabras[0], apellido2: palabras[1] };
   return { apellido1: palabras.join(' '), apellido2: '' };
+}
+
+/**
+ * Índice (base 0) de la fila de encabezado del CSV: la primera fila con contenido.
+ * @param {string[][]} csvRows
+ * @return {number} -1 si CSV_TIENE_CABECERA es false o no hay ninguna fila con contenido.
+ */
+function indiceCabecera_(csvRows) {
+  if (!CSV_TIENE_CABECERA) return -1;
+  for (let i = 0; i < csvRows.length; i++) {
+    const vacia = csvRows[i].every(function (c) { return String(c).trim() === ''; });
+    if (!vacia) return i;
+  }
+  return -1;
+}
+
+/**
+ * Comprueba que la fila de encabezado tiene, en las posiciones usadas, los nombres de formato.cabecerasEsperadas.
+ * @param {string[]} row Fila de encabezado.
+ * @param {Object} formato FORMATO_CSV_CURSOS o FORMATO_CSV_DATOS.
+ * @return {string} Descripción del problema, o '' si es correcta.
+ */
+function comprobarCabecera_(row, formato) {
+  const fallos = formato.cabecerasEsperadas.filter(function (c) {
+    const valor = row[c.idx] === undefined ? '' : row[c.idx];
+    return normalize_(valor) !== normalize_(c.nombre);
+  });
+  if (fallos.length === 0) return '';
+  return 'La primera línea debería ser el encabezado, pero no tiene las columnas esperadas:\n' +
+    fallos.map(function (c) {
+      const valor = row[c.idx] === undefined ? '' : collapse_(row[c.idx]);
+      return '  Campo ' + (c.idx + 1) + ': se esperaba "' + c.nombre + '" y hay "' + valor + '"';
+    }).join('\n');
+}
+
+/**
+ * Convierte la fecha del CSV en una fecha real de la hoja. Se fija a las 12:00 para que una diferencia de
+ * zona horaria entre el script y la hoja no cambie el día.
+ * @param {string} valorCsv Ej. "03/05/2009" (dd/mm/aaaa) o "2009-05-03".
+ * @return {Date|string} Date si se reconoce y es una fecha válida; si no, el texto tal cual ('' si venía vacío).
+ */
+function parsearFecha_(valorCsv) {
+  const texto = collapse_(valorCsv);
+  if (texto === '' || !CONVERTIR_FECHA) return texto;
+
+  let d, m, y;
+  let mt = texto.match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{4})(?:\s.*)?$/);
+  if (mt) {
+    d = Number(mt[1]); m = Number(mt[2]); y = Number(mt[3]);
+  } else {
+    mt = texto.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T\s].*)?$/);
+    if (!mt) return texto;
+    y = Number(mt[1]); m = Number(mt[2]); d = Number(mt[3]);
+  }
+  const fecha = new Date(y, m - 1, d, 12, 0, 0);
+  if (fecha.getFullYear() !== y || fecha.getMonth() !== m - 1 || fecha.getDate() !== d) return texto;  // ej. 31/02
+  return fecha;
+}
+
+/**
+ * Escribe un dato personal en el array de valores de una columna (no toca la hoja).
+ * @param {Array[]} celdas Valores de la columna ([[v], [v], ...]).
+ * @param {number} i Índice de la fila.
+ * @param {Date|string} valor Valor del CSV.
+ * @return {boolean} true si se ha escrito (no se escribe un valor vacío salvo SOBRESCRIBIR_CON_VACIOS).
+ */
+function aplicarDato_(celdas, i, valor) {
+  if (valor === '' && !SOBRESCRIBIR_CON_VACIOS) return false;
+  celdas[i][0] = valor;
+  return true;
 }
 
 /** Convierte una letra de columna ('A', 'Q', 'AB'...) en índice base 1. */
@@ -977,6 +1411,18 @@ function normalize_(s) {
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/,/g, ' ')
     .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Normalización del paso 2 (comparación estricta de nombres completos): como normalize_, y además cualquier
+ * carácter que no sea letra, número o espacio (guiones, apóstrofos, puntos, símbolos raros) pasa a espacio.
+ * Se aplica igual a los dos lados de la comparación. No sustituye a normalize_ (paso 1).
+ */
+function normalizarNombreEstricto_(s) {
+  return normalize_(s)
+    .replace(/[^a-z0-9 ]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
