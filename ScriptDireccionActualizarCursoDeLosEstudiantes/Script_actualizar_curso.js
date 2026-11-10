@@ -19,10 +19,14 @@
  *     (configurable, ver COL_FECHA_NACIMIENTO, COL_PAIS y COL_NACIONALIDAD).
  *     Solo las escribe el PASO 2. La columna E y cualquier otra no indicada en
  *     esta lista NO se tocan.
- *   - Columna Q: curso del estudiante, con un valor de CURSOS_VALIDOS
- *     (configurable, ver COL_CURSO). Solo la escribe el PASO 1.
- *   - Columna R: resto de la información del curso del CSV (grupo, "(R)",
- *     etc.) (configurable, ver COL_CURSO_EXTRA). Solo la escribe el PASO 1.
+ *   - Columna Q: curso del estudiante (configurable, ver COL_CURSO). Solo la
+ *     escribe el PASO 1. Contiene el curso normalizado (un valor de
+ *     CURSOS_VALIDOS), un espacio y el resto de la información del curso del CSV
+ *     (grupo, "(R)", etc.): por ejemplo "2ESO A" o "2BTO C (R)". La columna ya no
+ *     tiene límite de valores en la hoja, por lo que también recibe aquí las
+ *     incidencias ("NO ENCONTRADO", "EST DUPLICADO"...). Ya no existe la antigua
+ *     columna del "resto" (R): el script no la usa y no borra lo que tuviera de
+ *     ejecuciones anteriores.
  *   - Las primeras HEADER_ROWS filas son encabezado (el primer estudiante está
  *     en la fila 3 por defecto).
  *   - Se trabaja siempre sobre la HOJA ACTIVA; antes de empezar se muestra un
@@ -137,13 +141,13 @@
  *     preguntar.
  *   - Estudiante de la hoja encontrado en el CSV -> se escribe SIEMPRE el curso
  *     del CSV (el CSV es la fuente más actualizada), sea igual o distinto al actual.
- *   - REGLA GENERAL DE INCIDENCIAS: la columna COL_CURSO tiene validación de
- *     datos en la hoja, así que SOLO puede contener un valor de CURSOS_VALIDOS
- *     o estar en blanco. Ante cualquier incidencia (no encontrado, duplicado,
- *     curso no reconocido...) COL_CURSO se deja EN BLANCO y la incidencia se
- *     escribe en COL_CURSO_EXTRA. No escribir nunca textos de aviso en COL_CURSO.
- *   - Estudiante de la hoja NO encontrado en el CSV -> curso en blanco y
- *     TEXTO_NO_ENCONTRADO en COL_CURSO_EXTRA.
+ *   - REGLA GENERAL DE INCIDENCIAS: la columna COL_CURSO ya no tiene límite de
+ *     valores en la hoja. Ante cualquier incidencia (no encontrado, duplicado,
+ *     curso no reconocido, curso vacío) se escribe directamente el texto de la
+ *     incidencia en COL_CURSO (no hay curso que concatenar). Una IA no debe
+ *     volver a separar las incidencias en otra columna sin que se le pida.
+ *   - Estudiante de la hoja NO encontrado en el CSV -> TEXTO_NO_ENCONTRADO en
+ *     COL_CURSO.
  *   - Estudiante del CSV que no está en la hoja -> se añade como fila nueva
  *     justo después del último estudiante. Se escribe en MAYÚSCULAS conservando
  *     tildes y ñ. Reparto de apellidos (ver separarApellidos_): si son
@@ -154,31 +158,31 @@
  *     los estudiantes nuevos: los apellidos de los estudiantes que ya están en
  *     la hoja no se reescriben nunca.
  *   - Duplicados: si un nombre normalizado aparece más de una vez en la hoja o
- *     en el CSV, todas las filas afectadas quedan con el curso en blanco y
- *     TEXTO_DUPLICADO en COL_CURSO_EXTRA (si el CSV tiene más repeticiones que
+ *     en el CSV, todas las filas afectadas quedan con TEXTO_DUPLICADO en
+ *     COL_CURSO (si el CSV tiene más repeticiones que
  *     la hoja, las que faltan se añaden como filas nuevas también marcadas) y
  *     se cuentan en el resumen.
- *   - TRANSFORMACIÓN DEL CURSO (ver parsearCurso_): el valor del CSV se divide
- *     en "curso" (columna COL_CURSO, siempre un valor de CURSOS_VALIDOS) y
- *     "resto" (columna COL_CURSO_EXTRA). El valor puede traer varios elementos
- *     separados por coma. Ejemplos (CSV -> curso | resto):
- *         ESO1A          -> 1ESO | A
- *         ESO1A (R)      -> 1ESO | A (R)
- *         ESO 4D (R)     -> 4ESO | D (R)
- *         BTO2C (R)      -> 2BTO | C (R)
- *         FPB1A (R)      -> FPB  | 1A (R)   (el número se conserva en el resto)
- *         AE, ESO3A      -> AE   | ESO3A
- *         ESO4C, AE      -> AE   | ESO4C
+ *   - TRANSFORMACIÓN DEL CURSO (ver parsearCurso_ y componerCurso_): el valor del
+ *     CSV se divide internamente en "curso" (siempre un valor de CURSOS_VALIDOS)
+ *     y "resto", y en COL_CURSO se escribe "curso resto" separados por UN espacio.
+ *     El valor del CSV puede traer varios elementos separados por coma.
+ *     Ejemplos (CSV -> valor escrito en COL_CURSO):
+ *         ESO1A          -> 1ESO A
+ *         ESO1A (R)      -> 1ESO A (R)
+ *         ESO 4D (R)     -> 4ESO D (R)
+ *         BTO2C (R)      -> 2BTO C (R)
+ *         FPB1A (R)      -> FPB 1A (R)   (el número se conserva en el resto)
+ *         AE, ESO3A      -> AE ESO3A
+ *         ESO4C, AE      -> AE ESO4C
  *     Si aparece "AE" junto a un nivel, el curso es AE (AE_TIENE_PRIORIDAD).
- *     Si el curso viene VACÍO en el CSV, el curso queda en blanco y en
- *     COL_CURSO_EXTRA se escribe TEXTO_CURSO_VACIO; en el resumen se cuenta
- *     aparte ("Estudiantes con el curso vacío"), NO como curso no reconocido.
+ *     Si el curso viene VACÍO en el CSV, en COL_CURSO se escribe
+ *     TEXTO_CURSO_VACIO; en el resumen se cuenta aparte ("Estudiantes con el
+ *     curso vacío"), NO como curso no reconocido.
  *     Si el curso resultante no está en CURSOS_VALIDOS (o no se reconoce el
- *     valor), el curso queda en blanco, en COL_CURSO_EXTRA se escribe
- *     "TEXTO_CURSO_NO_RECONOCIDO: <valor original completo del CSV>" y se cuenta
- *     en el resumen.
- *     La columna del resto se reescribe entera para los estudiantes
- *     existentes (los valores anteriores se sobrescriben).
+ *     valor), en COL_CURSO se escribe "TEXTO_CURSO_NO_RECONOCIDO: <valor
+ *     original completo del CSV>" y se cuenta en el resumen.
+ *     La columna se reescribe entera para los estudiantes existentes (los
+ *     valores anteriores se sobrescriben).
  *   - NO se cambia ningún estilo/formato/color de la hoja.
  *   - Se muestra un resumen final solo con totales (estudiantes en el CSV,
  *     actualizados, nuevos, no encontrados, duplicados, líneas ignoradas y
@@ -260,11 +264,11 @@ const COL_APELLIDO2 = 'B';
 /** Letra de la columna del nombre en la hoja. */
 const COL_NOMBRE = 'C';
 
-/** Letra de la columna donde está (y se escribe) el curso del estudiante. */
+/**
+ * Letra de la columna donde está (y se escribe) el curso del estudiante: el curso normalizado, un espacio y el resto
+ * de la información del CSV (grupo, "(R)", etc.), por ejemplo "2ESO A". También se escriben aquí las incidencias.
+ */
 const COL_CURSO = 'Q';
-
-/** Letra de la columna donde se copia el resto de la información del curso del CSV (grupo, "(R)", etc.) y donde se escriben las incidencias. */
-const COL_CURSO_EXTRA = 'R';
 
 /** Letra de la columna donde el paso 2 copia la fecha de nacimiento del CSV. */
 const COL_FECHA_NACIMIENTO = 'D';
@@ -275,19 +279,19 @@ const COL_PAIS = 'F';
 /** Letra de la columna donde el paso 2 copia la nacionalidad del CSV. */
 const COL_NACIONALIDAD = 'G';
 
-/** Valores válidos de la columna de curso en la hoja. Lo que no encaje en esta lista se marca como no reconocido. */
+/** Valores válidos de la parte "curso" (sin el grupo). Lo que no encaje en esta lista se marca como no reconocido. */
 const CURSOS_VALIDOS = ['1ESO', '2ESO', '3ESO', '4ESO', '1BTO', '2BTO', 'AE', 'FPB'];
 
-/** Texto que se escribe en la columna COL_CURSO_EXTRA (el curso queda en blanco) de los estudiantes de la hoja que no aparecen en el CSV. */
+/** Texto que se escribe en la columna COL_CURSO de los estudiantes de la hoja que no aparecen en el CSV. */
 const TEXTO_NO_ENCONTRADO = 'NO ENCONTRADO';
 
-/** Texto que se escribe en la columna COL_CURSO_EXTRA (el curso queda en blanco) de los estudiantes con nombre duplicado. */
+/** Texto que se escribe en la columna COL_CURSO de los estudiantes con nombre duplicado. */
 const TEXTO_DUPLICADO = 'EST DUPLICADO';
 
-/** Texto que se escribe al inicio de la columna COL_CURSO_EXTRA (seguido del valor original del CSV; el curso queda en blanco) cuando el valor del CSV no se puede convertir a un curso válido. */
+/** Texto que se escribe al inicio de la columna COL_CURSO (seguido del valor original del CSV) cuando el valor del CSV no se puede convertir a un curso válido. */
 const TEXTO_CURSO_NO_RECONOCIDO = 'CURSO NO RECONOCIDO';
 
-/** Texto que se escribe en la columna COL_CURSO_EXTRA (el curso queda en blanco) cuando el curso viene vacío en el CSV. */
+/** Texto que se escribe en la columna COL_CURSO cuando el curso viene vacío en el CSV. */
 const TEXTO_CURSO_VACIO = 'CURSO VACÍO';
 
 /** Nombre del menú que se añade a la hoja de cálculo. */
@@ -753,7 +757,6 @@ function procesarCursos_(sheet, csvText, archivo, inicio) {
   const colA2 = colIndex_(COL_APELLIDO2);
   const colNom = colIndex_(COL_NOMBRE);
   const colCurso = colIndex_(COL_CURSO);
-  const colExtra = colIndex_(COL_CURSO_EXTRA);
   const firstRow = HEADER_ROWS + 1;
 
   // ---------- 1. Leer y parsear el CSV ----------
@@ -774,8 +777,7 @@ function procesarCursos_(sheet, csvText, archivo, inicio) {
       nomKey: normalize_(nombre),
       apellidos: apellidos.toLocaleUpperCase('es'),
       nombre: nombre.toLocaleUpperCase('es'),
-      curso: cursoInfo.curso,
-      extra: cursoInfo.extra,
+      cursoCompleto: componerCurso_(cursoInfo.curso, cursoInfo.extra),   // lo que se escribe en COL_CURSO (ej. "2ESO A")
       cursoReconocido: cursoInfo.reconocido,
       cursoVacio: cursoInfo.vacio,
       cursoOriginal: collapse_(row[CSV_CURSOS_IDX_CURSO])
@@ -941,10 +943,8 @@ function procesarCursos_(sheet, csvText, archivo, inicio) {
 
   // ---------- 3. Actualizar cursos de los estudiantes existentes ----------
   let cursos = [];
-  let extras = [];
   if (numStudents > 0) {
     cursos = sheet.getRange(firstRow, colCurso, numStudents, 1).getValues();
-    extras = sheet.getRange(firstRow, colExtra, numStudents, 1).getValues();
   }
 
   let actualizados = 0;
@@ -984,16 +984,13 @@ function procesarCursos_(sheet, csvText, archivo, inicio) {
     if (csvList) coincidencias++;
     if (!csvList) {
       if (interrumpido) continue;   // guardado parcial: la fila aún puede tener pregunta pendiente, no se marca
-      cursos[i][0] = '';
-      extras[i][0] = TEXTO_NO_ENCONTRADO;
+      cursos[i][0] = TEXTO_NO_ENCONTRADO;
       noEncontrados.push(sheetNames[i]);
     } else if (csvList.length > 1 || sheetMap.get(key).length > 1) {
-      cursos[i][0] = '';
-      extras[i][0] = TEXTO_DUPLICADO;
+      cursos[i][0] = TEXTO_DUPLICADO;
       duplicados.add(sheetNames[i]);
     } else {
-      cursos[i][0] = csvList[0].curso;
-      extras[i][0] = csvList[0].extra;
+      cursos[i][0] = csvList[0].cursoCompleto;
       actualizados++;
     }
   }
@@ -1015,15 +1012,13 @@ function procesarCursos_(sheet, csvText, archivo, inicio) {
       apellido1: separarApellidos_(entry.apellidos).apellido1,
       apellido2: separarApellidos_(entry.apellidos).apellido2,
       nombre: entry.nombre,
-      curso: esDuplicado ? '' : entry.curso,
-      extra: esDuplicado ? TEXTO_DUPLICADO : entry.extra
+      curso: esDuplicado ? TEXTO_DUPLICADO : entry.cursoCompleto
     });
   });
 
   // ---------- 5. Escribir en la hoja ----------
   if (numStudents > 0) {
     sheet.getRange(firstRow, colCurso, numStudents, 1).setValues(cursos);
-    sheet.getRange(firstRow, colExtra, numStudents, 1).setValues(extras);
   }
 
   if (cambioNombres) {
@@ -1044,8 +1039,6 @@ function procesarCursos_(sheet, csvText, archivo, inicio) {
       .setValues(nuevos.map(function (n) { return [n.nombre]; }));
     sheet.getRange(startRow, colCurso, nuevos.length, 1)
       .setValues(nuevos.map(function (n) { return [n.curso]; }));
-    sheet.getRange(startRow, colExtra, nuevos.length, 1)
-      .setValues(nuevos.map(function (n) { return [n.extra]; }));
   }
   SpreadsheetApp.flush();
 
@@ -1287,6 +1280,20 @@ function interpretarNivel_(texto) {
     };
   }
   return null;
+}
+
+/**
+ * Compone el valor que se escribe en COL_CURSO: el curso y el resto separados por un espacio.
+ * Si falta alguno de los dos se escribe solo el otro (ej. las incidencias, que no tienen curso).
+ * @param {string} curso Curso normalizado (ej. "2ESO"), o '' si hay una incidencia.
+ * @param {string} extra Resto del curso (ej. "A", "C (R)") o texto de la incidencia.
+ * @return {string} Ej. "2ESO A", "FPB 1A (R)", "NO ENCONTRADO".
+ */
+function componerCurso_(curso, extra) {
+  return [curso, extra]
+    .map(function (t) { return String(t || '').trim(); })
+    .filter(function (t) { return t !== ''; })
+    .join(' ');
 }
 
 /**
