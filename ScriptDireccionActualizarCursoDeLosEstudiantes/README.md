@@ -11,7 +11,7 @@ Los dos archivos deben obtenerse previamente de la plataforma y subirse a Google
 
 <br>
 
-## Para poder usarlo
+## Para poder usarlo *(primera vez)*
 
 - Abre el documento de Google Sheets donde quieras actualizar los estudiantes.
 - Ve al menú **Extensiones** y selecciona **Apps Script**.
@@ -20,7 +20,7 @@ Los dos archivos deben obtenerse previamente de la plataforma y subirse a Google
 - Cambia el nombre de *Proyecto sin título* por algo más descriptivo, por ejemplo *Actualizar datos de estudiantes*.
 - Guarda los cambios.
 - Vuelve a la hoja de cálculo y recárgala para que aparezca el menú **Estudiantes**.
-- La primera vez que ejecutes el script, Google te pedirá permisos para acceder a los archivos de Drive y modificar la hoja. Autorízalos para poder utilizarlo.
+- ⚠️ La primera vez que ejecutes el script, Google te pedirá permisos para acceder a los archivos de Drive y modificar la hoja. Autorízalos para poder utilizarlo.
 
 <br>
 
@@ -32,14 +32,14 @@ Antes de ejecutar el script, obtén **los dos listados** en la plataforma del ce
 2. Genera estos dos archivos:
 
    - **Filiación** (contiene nombre, apellidos y curso).
-     - En **Configuración de impresión**, selecciona **CSV con cabecera y pie**.
+     - ⚠️ En **Configuración de impresión**, selecciona **CSV con cabecera y pie**.
    - **Estandar / ALXE-25CL** (contiene los datos para completar la fecha de nacimiento, el país y la nacionalidad).
-     - En **Configuración de impresión**, selecciona **CSV con cabecera y pie**.
+     - ⚠️ En **Configuración de impresión**, selecciona **CSV con cabecera y pie**.
 
 3. Sube **ambos CSV** a Google Drive. Puedes guardarlos en la misma carpeta.
 4. Comprueba que los archivos se han subido correctamente. Después, al ejecutar cada paso, tendrás que pegar el enlace para compartir del CSV correspondiente. (**Archivo** → **Compartir** → **Copiar enlace**)
 
-Es recomendable conservar nombres de archivo que permitan distinguir claramente el listado de **Filiación** del de **Estandar / ALXE-25CL**.
+💡Es recomendable conservar nombres de archivo que permitan distinguir claramente el listado de **Filiación** del de **Estandar / ALXE-25CL**.
 
 <br>
 
@@ -60,7 +60,7 @@ Ejecuta cada opción con el archivo correspondiente.
 4. Si hay estudiantes con los mismos apellidos pero nombres distintos, el script puede pedir confirmación manual para decidir si se trata de la misma persona.
 5. Al terminar, aparecerá un resumen con los totales del proceso.
 
-Este paso actualiza el curso de los estudiantes, añade los que aparecen en el listado oficial pero todavía no están en la hoja y señala las incidencias.
+Este paso actualiza el curso de los estudiantes, añade los que aparecen en el listado oficial pero todavía no están en la hoja y señala las incidencias (No encontrado, Duplicado, etc).
 
 ### Paso 2: Completar fecha de nacimiento, país y nacionalidad
 
@@ -73,11 +73,12 @@ Este paso busca coincidencias exactas y únicas por nombre y apellidos. Cuando e
 
 <br>
 
-## Formato de los CSV
+## Información extra del script y su funcionamiento
+### Formato de los CSV
 
 Los dos archivos deben ser los CSV exportados desde la plataforma con la opción **CSV con cabecera y pie**. El script comprueba que cada archivo corresponde al paso seleccionado y que contiene las columnas esperadas.
 
-### CSV del paso 1: Filiación
+#### CSV del paso 1: Filiación
 
 Se utiliza para actualizar los cursos. Debe contener las columnas:
 
@@ -88,7 +89,7 @@ Se utiliza para actualizar los cursos. Debe contener las columnas:
 
 Se utilizan los campos **Apellidos**, **Nombre** y **Sección**. El campo **NIF/Pasaporte** se ignora.
 
-### CSV del paso 2: Estandar / ALXE-25CL
+#### CSV del paso 2: Estandar / ALXE-25CL
 
 Se utiliza para completar los datos personales. Debe contener las columnas:
 
@@ -103,9 +104,9 @@ Se utilizan los campos **Alumno/a**, **Fecha nacimiento**, **País** y **NACIONA
 
 <br>
 
-## Qué hace con los estudiantes
+### Qué hace con los estudiantes
 
-### Paso 1: cursos
+#### Paso 1: cursos
 
 - **Coincidencia exacta:** compara apellidos y nombre normalizados, ignorando mayúsculas, tildes y espacios repetidos.
 - **Posibles coincidencias con los mismos apellidos:** si no hay coincidencia exacta, puede pedir confirmación manual. Se puede elegir actualizar el nombre y el curso, actualizar solo el curso (con una segunda confirmación) o indicar que no es la misma persona.
@@ -115,7 +116,7 @@ Se utilizan los campos **Alumno/a**, **Fecha nacimiento**, **País** y **NACIONA
 - **Duplicados:** si el nombre normalizado aparece repetido en la hoja o en el CSV, las filas afectadas se marcan como duplicadas y el curso queda en blanco.
 - **Cursos no reconocidos o vacíos:** el curso queda en blanco y se indica la incidencia en la columna de información adicional.
 
-### Paso 2: datos personales
+#### Paso 2: datos personales
 
 - **Coincidencia exacta y única:** compara el nombre completo del CSV con el nombre y los apellidos de la hoja, sin distinguir mayúsculas, tildes ni signos de puntuación.
 - **Datos encontrados:** actualiza la fecha de nacimiento, el país y la nacionalidad.
@@ -125,7 +126,7 @@ Se utilizan los campos **Alumno/a**, **Fecha nacimiento**, **País** y **NACIONA
 
 <br>
 
-## Configuración
+### Configuraciones que permite el script
 
 Si necesitas adaptar el script a otra hoja o a otros cursos, busca el bloque **CONFIGURACIÓN** al principio del código.
 
@@ -164,7 +165,7 @@ Los resúmenes no muestran nombres de estudiantes.
 Si el script detecta un problema con el archivo, una estructura incorrecta o un posible error de configuración, puede detenerse o pedir confirmación antes de escribir datos. Si se aborta en esas comprobaciones, no se modifica la hoja.
 
 <br/><br/><br/>
-## Control del tiempo de ejecución (Paso 1)
+## ⌛ Control del tiempo de ejecución (Paso 1)
 
 El **Paso 1** puede necesitar mostrar preguntas para confirmar si dos registros con los mismos apellidos corresponden a la misma persona. Como Google Apps Script limita cada ejecución a **6 minutos**, el programa incorpora un aviso preventivo al cumplirse **5 minutos** desde el inicio del paso, cuando va a mostrar la siguiente pregunta.
 
